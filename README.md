@@ -1,8 +1,27 @@
 # FinFlow Analytics
 
-FinFlow is a finance workflow platform for uploading files, resolving instructions, running agent-driven processing, and reviewing results in a web UI.
+FinFlow Analytics turns messy spreadsheet requests into structured workflows.
 
-The project has three main layers:
+It is built for teams that need to upload XLSX files, describe work in plain English, and get back a deterministic, reviewable result without manually mapping every column or step.
+
+## What It Solves
+
+- Removes the need to build one-off scripts for every spreadsheet request.
+- Handles inconsistent XLSX layouts without forcing users to rename everything first.
+- Interprets natural-language prompts instead of relying on rigid forms.
+- Detects ambiguity and asks follow-up questions instead of guessing.
+- Converts the final request into an execution plan that can be audited and replayed.
+
+## Key Features
+
+- Natural-language workflow requests
+- Spreadsheet-aware column grounding
+- Interactive ambiguity resolution
+- Dynamic DAG / execution-plan generation
+- Live job progress and audit trail
+- Backend worker dispatch for long-running tasks
+
+## Project Layers
 
 - `frontend/` - React app for users, managers, and admins.
 - `backend/` - FastAPI API, persistence, auth, uploads, review, clarification, and dispatch.
