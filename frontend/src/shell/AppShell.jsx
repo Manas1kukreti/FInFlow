@@ -107,6 +107,7 @@ export default function AppShell() {
     if (location.pathname.startsWith("/jobs/new")) return "Submit job";
     if (location.pathname.startsWith("/jobs/")) return "Job audit trail";
     if (location.pathname.startsWith("/jobs")) return "My jobs";
+    if (location.pathname.startsWith("/employee-chat")) return "Employee chat";
     if (location.pathname.startsWith("/manager")) return "Manager dashboard";
     if (location.pathname.startsWith("/agents")) return "Admin dashboard";
     if (location.pathname.startsWith("/alerts")) return "Alerts";

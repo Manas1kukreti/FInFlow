@@ -27,6 +27,8 @@ from finflow_agent.models.draft import (
     SemanticColumnReference,
     SemanticIntentDraft,
     SortAction,
+    VisualizeAction,
+    VisualizationMeasure,
 )
 
 
@@ -149,5 +151,16 @@ def _extract_column_references(action: DraftAction) -> list[SemanticColumnRefere
         return list(action.keys)
     elif isinstance(action, RenameAction):
         return [col_ref for col_ref, _new_name in action.mappings]
+    elif isinstance(action, VisualizeAction):
+        refs: list[SemanticColumnReference] = []
+        if action.x is not None:
+            refs.append(action.x)
+        if isinstance(action.y, SemanticColumnReference):
+            refs.append(action.y)
+        elif isinstance(action.y, VisualizationMeasure) and action.y.column is not None:
+            refs.append(action.y.column)
+        if action.series is not None:
+            refs.append(action.series)
+        return refs
     else:
         return []

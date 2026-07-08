@@ -23,6 +23,7 @@ from finflow_agent.execution.visualization.spec import (
     FieldMetadata,
     VisualizationSpec,
 )
+from finflow_agent.execution.visualization.capabilities import VISUALIZATION_CAPABILITIES
 from finflow_agent.execution.visualization.validators import (
     CHART_VALIDATORS,
     ValidationResult,
@@ -173,6 +174,19 @@ class VisualizationExecutor:
         resolved_chart_type = self._resolve_chart_type(normalized_chart_type, data_shape)
 
         # Step 6: Run chart compatibility validation. Req 8.1-8.7
+        if encoding.get("series") and not VISUALIZATION_CAPABILITIES.get(resolved_chart_type, VISUALIZATION_CAPABILITIES["auto"]).supports_series:
+            return VisualizationSpec(
+                operation_id=operation_id,
+                source_result_id=source_result_id,
+                status="unsupported",
+                chart_type=resolved_chart_type,
+                title=self._generate_title(resolved_chart_type, self._find_primary_measure(encoding, fields)),
+                encoding={},
+                data=[],
+                error=self._format_error(
+                    f"{resolved_chart_type.capitalize()} chart does not support a secondary series field."
+                ),
+            )
         validator = CHART_VALIDATORS.get(resolved_chart_type)
         if validator is not None:
             validation_result: ValidationResult = validator.validate(reader, encoding)
@@ -240,9 +254,11 @@ class VisualizationExecutor:
 
         x_field_id = encoding.get("x", "")
         y_field_id = encoding.get("y", "")
+        series_field_id = encoding.get("series", "")
         field_map = {f.id: f for f in fields}
         x_label = field_map[x_field_id].label if x_field_id in field_map else x_field_id
         y_label = field_map[y_field_id].label if y_field_id in field_map else y_field_id
+        series_label = field_map[series_field_id].label if series_field_id in field_map else series_field_id
 
         if chart_type == "pie":
             return {
@@ -257,6 +273,7 @@ class VisualizationExecutor:
             **encoding,
             "x_label": x_label,
             "y_label": y_label,
+            **({"series_label": series_label} if series_field_id else {}),
         }
 
     def _normalize_chart_type(self, chart_type: str | None) -> str:
@@ -306,7 +323,7 @@ class VisualizationExecutor:
         # Define which axis roles map to which validation rules
         measure_axes = {"y", "value", "size"}
         time_axes = {"x_time", "time"}
-        category_axes = {"x_category", "category", "label", "name"}
+        category_axes = {"x_category", "category", "label", "name", "series"}
 
         for axis_role, field_id in encoding.items():
             # Check existence. Req 17.1

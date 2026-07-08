@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FiCheck, FiChevronDown, FiDownload, FiRefreshCw, FiX } from "react-icons/fi";
-import { useParams } from "react-router-dom";
+import { FiCheck, FiChevronDown, FiDownload, FiMessageSquare, FiRefreshCw, FiX } from "react-icons/fi";
+import { Link, useParams } from "react-router-dom";
 import DataTable from "../components/DataTable.jsx";
 import ClarificationPanel from "../components/ClarificationPanel.jsx";
 import { VisualizationRenderer } from "../components/visualization/index.js";
@@ -228,6 +228,13 @@ export default function AuditPage() {
             <span className={`ff-status ff-status--${job.status}`}>
               {formatJobStatus(job.status)}
             </span>
+            <Link
+              to={`/employee-chat?jobId=${encodeURIComponent(job.backendId)}`}
+              className="ff-secondary-button"
+            >
+              <FiMessageSquare size={15} />
+              Open chat
+            </Link>
             {job.status === "complete" && job.outputReady ? (
               <button
                 type="button"

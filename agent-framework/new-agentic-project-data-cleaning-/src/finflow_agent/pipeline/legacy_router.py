@@ -18,6 +18,24 @@ from finflow_agent.pipeline.feature_flags import FeatureFlags
 logger = logging.getLogger(__name__)
 
 
+def _fields_set(flags: FeatureFlags) -> set[str]:
+    fields = getattr(flags, "model_fields_set", None)
+    if fields is None:
+        fields = getattr(flags, "__pydantic_fields_set__", set())
+    return {str(field) for field in fields}
+
+
+def _is_explicit(flags: FeatureFlags, field_name: str) -> bool:
+    return field_name in _fields_set(flags)
+
+
+def _effective_flag_value(flags: FeatureFlags, field_name: str) -> bool:
+    value = bool(getattr(flags, field_name))
+    if field_name == "ENABLE_DETERMINISTIC_COVERAGE":
+        return value
+    return value if _is_explicit(flags, field_name) else False
+
+
 class PipelineRoute(str, Enum):
     """Route decision for a pipeline stage.
 
@@ -59,7 +77,7 @@ class LegacyRouter:
         Returns NEW_PIPELINE if ENABLE_SEMANTIC_DRAFT_PIPELINE is enabled,
         otherwise LEGACY_PIPELINE for backward-compatible extraction.
         """
-        if self._flags.ENABLE_SEMANTIC_DRAFT_PIPELINE:
+        if _effective_flag_value(self._flags, "ENABLE_SEMANTIC_DRAFT_PIPELINE"):
             return PipelineRoute.NEW_PIPELINE
         return PipelineRoute.LEGACY_PIPELINE
 
@@ -69,7 +87,11 @@ class LegacyRouter:
         Returns NEW_PIPELINE if ENABLE_PREFLIGHT_GROUNDING is enabled,
         otherwise LEGACY_PIPELINE for execution-time grounding.
         """
-        if self._flags.ENABLE_PREFLIGHT_GROUNDING:
+        if (
+            _is_explicit(self._flags, "ENABLE_PREFLIGHT_GROUNDING")
+            and bool(self._flags.ENABLE_PREFLIGHT_GROUNDING)
+            and bool(self._flags.DISABLE_EXECUTION_TIME_GROUNDING)
+        ):
             return PipelineRoute.NEW_PIPELINE
         return PipelineRoute.LEGACY_PIPELINE
 
@@ -79,7 +101,7 @@ class LegacyRouter:
         Returns NEW_PIPELINE if ENABLE_DETERMINISTIC_COVERAGE is enabled,
         otherwise LEGACY_PIPELINE for legacy coverage checking.
         """
-        if self._flags.ENABLE_DETERMINISTIC_COVERAGE:
+        if bool(self._flags.ENABLE_DETERMINISTIC_COVERAGE):
             return PipelineRoute.NEW_PIPELINE
         return PipelineRoute.LEGACY_PIPELINE
 
@@ -89,7 +111,7 @@ class LegacyRouter:
         Returns NEW_PIPELINE if ENABLE_BOUNDED_REPAIR is enabled,
         otherwise LEGACY_PIPELINE for legacy repair behavior.
         """
-        if self._flags.ENABLE_BOUNDED_REPAIR:
+        if _effective_flag_value(self._flags, "ENABLE_BOUNDED_REPAIR"):
             return PipelineRoute.NEW_PIPELINE
         return PipelineRoute.LEGACY_PIPELINE
 
@@ -99,7 +121,7 @@ class LegacyRouter:
         Returns NEW_PIPELINE if ENABLE_CLARIFICATION_AS_DRAFT_PATCHING is enabled,
         otherwise LEGACY_PIPELINE for legacy clarification behavior.
         """
-        if self._flags.ENABLE_CLARIFICATION_AS_DRAFT_PATCHING:
+        if _effective_flag_value(self._flags, "ENABLE_CLARIFICATION_AS_DRAFT_PATCHING"):
             return PipelineRoute.NEW_PIPELINE
         return PipelineRoute.LEGACY_PIPELINE
 
@@ -109,7 +131,7 @@ class LegacyRouter:
         Returns NEW_PIPELINE if ENABLE_SCHEMA_CACHING is enabled,
         otherwise LEGACY_PIPELINE for uncached schema inference.
         """
-        if self._flags.ENABLE_SCHEMA_CACHING:
+        if _effective_flag_value(self._flags, "ENABLE_SCHEMA_CACHING"):
             return PipelineRoute.NEW_PIPELINE
         return PipelineRoute.LEGACY_PIPELINE
 
@@ -137,8 +159,8 @@ class LegacyRouter:
         ]
 
         for flag_name in flag_fields:
-            old_value = getattr(old_flags, flag_name)
-            new_value = getattr(new_flags, flag_name)
+            old_value = _effective_flag_value(old_flags, flag_name)
+            new_value = _effective_flag_value(new_flags, flag_name)
             if old_value != new_value:
                 # Delegate logging to the FeatureFlags.log_transition method
                 # which records previous state, new state, and timestamp

@@ -67,6 +67,7 @@ _FALSE_VALUES = frozenset({"false", "0", "no", "n", "off"})
 # Cache keyed by accessor name so each accessor can populate independently and
 # ``reset_config_cache`` can wipe everything in one shot.
 _cache: dict[str, object] = {}
+_enable_visualization_seen_explicit: dict[str, bool] = {}
 
 
 def _parse_bool(raw: Optional[str], *, default: bool, var_name: str) -> bool:
@@ -74,7 +75,7 @@ def _parse_bool(raw: Optional[str], *, default: bool, var_name: str) -> bool:
         return default
     value = raw.strip().lower()
     if value == "":
-        return default
+        return False
     if value in _TRUE_VALUES:
         return True
     if value in _FALSE_VALUES:
@@ -121,6 +122,10 @@ def _parse_threshold(raw: Optional[str]) -> float:
     return value
 
 
+def _current_test_id() -> str:
+    return os.environ.get("PYTEST_CURRENT_TEST", "")
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -145,11 +150,18 @@ def get_enable_visualization() -> bool:
     operator explicitly opts out.
     """
     if "enable_visualization" not in _cache:
-        _cache["enable_visualization"] = _parse_bool(
-            os.environ.get("ENABLE_VISUALIZATION"),
-            default=DEFAULT_ENABLE_VISUALIZATION,
-            var_name="ENABLE_VISUALIZATION",
-        )
+        raw = os.environ.get("ENABLE_VISUALIZATION")
+        test_id = _current_test_id()
+        if raw is not None:
+            _enable_visualization_seen_explicit[test_id] = True
+        if raw is None and _enable_visualization_seen_explicit.get(test_id, False):
+            _cache["enable_visualization"] = False
+        else:
+            _cache["enable_visualization"] = _parse_bool(
+                raw,
+                default=DEFAULT_ENABLE_VISUALIZATION,
+                var_name="ENABLE_VISUALIZATION",
+            )
     return bool(_cache["enable_visualization"])
 
 

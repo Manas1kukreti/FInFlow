@@ -9,7 +9,7 @@ from finflow_agent.operations.errors import UnsafeInputPathError
 
 class IngestionAgentParams(BaseModel):
     resolved_file_path: str
-    file_type: Literal["xlsx", "xls", "csv", "pdf"]
+    file_type: Literal["xlsx", "xls", "csv"]
 
 @registry.register
 class IngestionAgent:
@@ -54,13 +54,13 @@ class IngestionAgent:
                 ),
             )
 
-        if file_type not in ["xlsx", "xls", "csv", "pdf"]:
+        if file_type not in ["xlsx", "xls", "csv"]:
             return AgentResult(
                 status="failed",
                 error_message=(
                     "Unsupported file type for IngestionAgent: "
                     f"file_type={file_type!r}, path={resolved_file_path!r}. "
-                    "Allowed values: 'xlsx', 'xls', 'csv', 'pdf'."
+                    "Allowed values: 'xlsx', 'xls', 'csv'."
                 ),
             )
 
@@ -96,8 +96,6 @@ class IngestionAgent:
         try:
             if file_type == "csv":
                 df = pd.read_csv(resolved_file_path)
-            elif file_type == "pdf":
-                df = self._parse_pdf(resolved_file_path)
             else:
                 df = pd.read_excel(resolved_file_path)
 

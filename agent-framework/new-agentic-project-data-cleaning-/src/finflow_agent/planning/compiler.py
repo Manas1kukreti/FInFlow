@@ -18,9 +18,9 @@ described by the agent-pipeline-hardening spec (Component 6). It enforces:
 * A ``visualization_agent`` step is only emitted when visualization is
   enabled at the process level. Otherwise the compiler raises
   :class:`VisualizationDisabledError`.
-* Every emitted ``output_key`` is drawn from the canonical set
-  ``{df_ingested, df_cleaned, df_filter_prepared, df_filtered,
-  df_visualized, report_output}``.
+ * Every emitted ``output_key`` is drawn from the canonical set or one of the
+   deterministic visualization branch families
+   ``{df_calc_viz_<n>, df_visualized_<n>}``.
 
 Requirements satisfied: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10,
 2.11, 2.12, 2.13, 2.14, 2.15, 2.16, 2.17, 9.2.
@@ -116,9 +116,9 @@ VISUALIZATION_REQUESTED_BUT_DISABLED_MESSAGE: str = (
     f"Visualization was requested, but {VISUALIZATION_DISABLED_MESSAGE}"
 )
 
-# Canonical ``output_key`` set that the compiler is permitted to emit. Listed
-# explicitly so the contract is unambiguous and the assertion in the
-# post-conditions can use a frozen set.
+# Canonical ``output_key`` set that the compiler is permitted to emit. The
+# visualization branch also allows deterministic suffixed variants checked by
+# ``_is_canonical_output_key`` below.
 CANONICAL_OUTPUT_KEYS: frozenset[str] = frozenset(
     {
         "df_ingested",
@@ -132,6 +132,10 @@ CANONICAL_OUTPUT_KEYS: frozenset[str] = frozenset(
         "df_calc_viz_3",
         "df_calc_viz_4",
         "df_visualized",
+        "df_visualized_1",
+        "df_visualized_2",
+        "df_visualized_3",
+        "df_visualized_4",
         "report_output",
     }
 )
@@ -266,7 +270,7 @@ def _assert_canonical_output_keys(steps: List[PlanStep]) -> None:
     the contract local to this function and surfaces regressions quickly.
     """
     for step in steps:
-        if step.output_key is not None and step.output_key not in CANONICAL_OUTPUT_KEYS:
+        if step.output_key is not None and not _is_canonical_output_key(step.output_key):
             raise ValueError(
                 f"Compiler emitted non-canonical output_key {step.output_key!r} "
                 f"on step {step.step_id!r}; allowed keys: "
@@ -297,6 +301,67 @@ def _assert_filter_input_from(steps: List[PlanStep]) -> None:
                 f"{step.input_from!r}; expected ['df_cleaned'] or "
                 f"['df_filter_prepared']."
             )
+
+
+def _is_canonical_output_key(output_key: str) -> bool:
+    """Return True when *output_key* matches the compiler's allowed families."""
+    if output_key in CANONICAL_OUTPUT_KEYS:
+        return True
+    if output_key.startswith("df_calc_viz_") and output_key[len("df_calc_viz_"):].isdigit():
+        return True
+    if output_key.startswith("df_visualized_") and output_key[len("df_visualized_"):].isdigit():
+        return True
+    return False
+
+
+def _chart_requires_visualization_calculation(chart: ChartSpec) -> bool:
+    """Return True when *chart* needs a chart-local calculation branch."""
+    return bool(chart.group_by)
+
+
+def _build_visualization_calc_operation(chart: ChartSpec) -> dict[str, Any]:
+    """Build the calculation operation that prepares a chart-local dataframe."""
+    aggregation = chart.aggregation or "count"
+    op_type = {
+        "count": "group_count",
+        "sum": "group_sum",
+        "mean": "group_mean",
+    }.get(aggregation, "group_count")
+    measure_column = chart.measure
+    if aggregation == "count":
+        measure_column = None
+    elif not measure_column:
+        measure_column = chart.y
+    return {
+        "type": op_type,
+        "column": measure_column,
+        "group_by": list(chart.group_by or []),
+        "output_column": chart.output_field or chart.y,
+    }
+
+
+def _normalize_chart_for_compilation(chart: ChartSpec) -> ChartSpec:
+    """Normalize known-safe chart redundancies before compilation.
+
+    Count aggregations are dimension-only calculations; any measure copied from
+    the grouping field is redundant and can produce invalid ``OperationResult``
+    contracts downstream.
+    """
+    aggregation = chart.aggregation or "count"
+    if aggregation != "count":
+        return chart
+
+    normalized_group_by = list(chart.group_by or [])
+    normalized_series = chart.series
+    if len(normalized_group_by) == 1 and normalized_series == normalized_group_by[0]:
+        normalized_series = None
+
+    return chart.model_copy(
+        update={
+            "measure": None,
+            "series": normalized_series,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -475,10 +540,9 @@ def compile_intent_to_plan(
     #    step 0. The flag is read via ``get_enable_visualization`` so test
     #    fixtures can monkeypatch it deterministically.
     #
-    #    When the visualization plan contains charts that declare a
-    #    ``group_by`` field, the compiler inserts a ``calculation_agent``
-    #    The visualization agent handles per-chart aggregation internally,
-    #    so it receives the raw clean/filtered dataframe directly.
+    #    Shared transformations (clean/filter/calculate) advance the global
+    #    dataframe cursor. Visualization-specific aggregations MUST branch
+    #    from that shared source without mutating it for unrelated charts.
     # ------------------------------------------------------------------
     if intent.needs_visualization and intent.visualization_plan is not None:
         if not get_enable_visualization():
@@ -486,25 +550,108 @@ def compile_intent_to_plan(
                 VISUALIZATION_REQUESTED_BUT_DISABLED_MESSAGE
             )
 
-        # Collect descriptions for per-chart column inference
-        chart_descriptions = [
-            chart.title or chart.x or "" for chart in intent.visualization_plan.charts
-        ]
+        charts = list(intent.visualization_plan.charts)
+        visualization_source_key = last_df_key
+        visualization_depends_on = [steps[-1].step_id]
 
-        steps.append(
-            PlanStep(
-                step_id="visualize",
-                agent="visualization_agent",
-                params={
-                    "plan": intent.visualization_plan.model_dump(),
-                    "chart_descriptions": chart_descriptions,
-                },
-                depends_on=[steps[-1].step_id],
-                input_from=[last_df_key],
-                output_key="df_visualized",
+        if len(charts) == 1:
+            chart = _normalize_chart_for_compilation(charts[0])
+            viz_input_key = visualization_source_key
+            viz_depends_on = list(visualization_depends_on)
+
+            if _chart_requires_visualization_calculation(chart):
+                steps.append(
+                    PlanStep(
+                        step_id="calc_viz",
+                        agent="calculation_agent",
+                        params={"operations": [_build_visualization_calc_operation(chart)]},
+                        depends_on=list(visualization_depends_on),
+                        input_from=[visualization_source_key],
+                        output_key="df_calc_viz",
+                    )
+                )
+                viz_input_key = "df_calc_viz"
+                viz_depends_on = ["calc_viz"]
+
+            steps.append(
+                PlanStep(
+                    step_id="visualize",
+                    agent="visualization_agent",
+                    params={
+                        "plan": {"charts": [chart.model_dump()]},
+                        "chart_descriptions": [chart.title or chart.x or ""],
+                    },
+                    depends_on=viz_depends_on,
+                    input_from=[viz_input_key],
+                    output_key="df_visualized",
+                )
             )
-        )
-        last_df_key = "df_visualized"
+            last_df_key = "df_visualized"
+        else:
+            visualization_output_keys: List[str] = []
+            visualization_step_ids: List[str] = []
+
+            for index, chart in enumerate(charts, start=1):
+                chart = _normalize_chart_for_compilation(chart)
+                viz_input_key = visualization_source_key
+                viz_depends_on = list(visualization_depends_on)
+
+                if _chart_requires_visualization_calculation(chart):
+                    calc_step_id = f"calc_viz_{index}"
+                    calc_output_key = f"df_calc_viz_{index}"
+                    steps.append(
+                        PlanStep(
+                            step_id=calc_step_id,
+                            agent="calculation_agent",
+                            params={"operations": [_build_visualization_calc_operation(chart)]},
+                            depends_on=list(visualization_depends_on),
+                            input_from=[visualization_source_key],
+                            output_key=calc_output_key,
+                        )
+                    )
+                    viz_input_key = calc_output_key
+                    viz_depends_on = [calc_step_id]
+
+                viz_step_id = f"visualize_{index}"
+                viz_output_key = f"df_visualized_{index}"
+                steps.append(
+                    PlanStep(
+                        step_id=viz_step_id,
+                        agent="visualization_agent",
+                        params={
+                            "plan": {"charts": [chart.model_dump()]},
+                            "chart_descriptions": [chart.title or chart.x or ""],
+                        },
+                        depends_on=viz_depends_on,
+                        input_from=[viz_input_key],
+                        output_key=viz_output_key,
+                    )
+                )
+                visualization_step_ids.append(viz_step_id)
+                visualization_output_keys.append(viz_output_key)
+
+            last_df_key = visualization_source_key
+            steps.append(
+                PlanStep(
+                    step_id="report",
+                    agent="reporting_agent",
+                    params=build_reporting_params(intent, output_dir, file_prefix),
+                    depends_on=visualization_step_ids,
+                    input_from=[visualization_source_key, *visualization_output_keys],
+                    output_key="report_output",
+                )
+            )
+
+            plan = ExecutionPlan(steps=steps)
+            assert plan.steps[0].agent == "ingestion_agent", (
+                "Compiler post-condition violated: first step must be ingestion_agent"
+            )
+            assert plan.steps[-1].agent == "reporting_agent", (
+                "Compiler post-condition violated: last step must be reporting_agent"
+            )
+            _assert_canonical_output_keys(plan.steps)
+            _assert_filter_input_from(plan.steps)
+            return plan
 
     # ------------------------------------------------------------------
     # 4. Reporting is always the last step (Requirement 2.1).
@@ -614,6 +761,14 @@ def _canonical_intent_to_plan_intent(
     visualize_aggregation: str | None = None
     visualize_measure: str | None = None
     visualize_output_field: str | None = None
+    visualize_x: str | None = None
+    visualize_series: str | None = None
+    visualize_bar_mode: str | None = None
+    visualize_show_legend: bool | None = None
+    visualize_show_data_labels: bool | None = None
+    visualize_title: str | None = None
+    visualize_x_axis_title: str | None = None
+    visualize_y_axis_title: str | None = None
     visualize_intents: list[dict] = []
 
     for action in intent.actions:
@@ -677,6 +832,26 @@ def _canonical_intent_to_plan_intent(
             visualize_aggregation = action.aggregation
             visualize_measure = action.measure
             visualize_output_field = action.output_field
+            visualize_x = action.x
+            visualize_series = action.series
+            visualize_bar_mode = action.bar_mode
+            visualize_show_legend = action.show_legend
+            visualize_show_data_labels = action.show_data_labels
+            visualize_title = action.title
+            visualize_x_axis_title = action.x_axis_title
+            visualize_y_axis_title = action.y_axis_title
+            visualize_intents[-1].update(
+                {
+                    "x": action.x,
+                    "series": action.series,
+                    "bar_mode": action.bar_mode,
+                    "show_legend": action.show_legend,
+                    "show_data_labels": action.show_data_labels,
+                    "title": action.title,
+                    "x_axis_title": action.x_axis_title,
+                    "y_axis_title": action.y_axis_title,
+                }
+            )
             continue
         if isinstance(action, ReportIntent):
             continue
@@ -716,6 +891,14 @@ def _canonical_intent_to_plan_intent(
             "aggregation": visualize_aggregation,
             "measure": visualize_measure,
             "output_field": visualize_output_field,
+            "x": visualize_x,
+            "series": visualize_series,
+            "bar_mode": visualize_bar_mode,
+            "show_legend": visualize_show_legend,
+            "show_data_labels": visualize_show_data_labels,
+            "title": visualize_title,
+            "x_axis_title": visualize_x_axis_title,
+            "y_axis_title": visualize_y_axis_title,
         }]
 
         for viz_intent in intents_to_process:
@@ -725,13 +908,18 @@ def _canonical_intent_to_plan_intent(
             viz_measure = viz_intent.get("measure")
             viz_aggregation = viz_intent.get("aggregation")
             viz_output_field = viz_intent.get("output_field")
+            viz_x = viz_intent.get("x")
+            viz_series = viz_intent.get("series")
+            viz_bar_mode = viz_intent.get("bar_mode")
 
             # Determine x and y fields
             x_field = ""
             y_field = ""
             agg_type = viz_aggregation or "count"
 
-            if viz_group_by and isinstance(viz_group_by, list) and viz_group_by:
+            if viz_x:
+                x_field = viz_x
+            elif viz_group_by and isinstance(viz_group_by, list) and viz_group_by:
                 x_field = viz_group_by[0]
             if viz_measure:
                 y_field = viz_measure
@@ -786,6 +974,17 @@ def _canonical_intent_to_plan_intent(
             effective_group_by = viz_group_by
             if not effective_group_by and x_field and resolved_chart_type in ("pie", "bar"):
                 effective_group_by = [x_field]
+            if viz_series:
+                if effective_group_by is None:
+                    effective_group_by = []
+                if x_field and not effective_group_by:
+                    effective_group_by.append(x_field)
+                if viz_series not in effective_group_by:
+                    effective_group_by.append(viz_series)
+            if effective_group_by and len(effective_group_by) > 2:
+                raise ValueError(
+                    "TOO_MANY_VISUALIZATION_DIMENSIONS: bar charts support at most two grouping dimensions."
+                )
 
             effective_measure = viz_measure
             if not effective_measure and calculation_operations:
@@ -796,18 +995,33 @@ def _canonical_intent_to_plan_intent(
                         break
 
             effective_aggregation = agg_type if agg_type != "count" else (viz_aggregation or "count")
+            normalized_series = viz_series
+            if effective_aggregation == "count":
+                effective_measure = None
+                if effective_group_by and len(effective_group_by) == 1 and normalized_series == effective_group_by[0]:
+                    normalized_series = None
 
             try:
-                chart_title = viz_intent.get("description", f"{resolved_chart_type.capitalize()} Chart") or f"{resolved_chart_type.capitalize()} Chart"
+                chart_title = (
+                    viz_intent.get("title")
+                    or viz_intent.get("description")
+                    or f"{resolved_chart_type.capitalize()} Chart"
+                )
                 charts_list.append(ChartSpec(
                     type=resolved_chart_type,
                     x=x_field,
                     y=y_field,
                     title=chart_title,
                     group_by=effective_group_by,
+                    series=normalized_series or (effective_group_by[1] if effective_group_by and len(effective_group_by) > 1 else None),
                     measure=effective_measure,
                     aggregation=effective_aggregation,
                     output_field=y_field,
+                    bar_mode=viz_bar_mode or ("grouped" if resolved_chart_type == "bar" and effective_group_by and len(effective_group_by) > 1 else None),
+                    show_legend=viz_intent.get("show_legend"),
+                    show_data_labels=viz_intent.get("show_data_labels"),
+                    x_axis_title=viz_intent.get("x_axis_title"),
+                    y_axis_title=viz_intent.get("y_axis_title"),
                 ))
             except Exception:
                 continue

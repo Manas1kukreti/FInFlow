@@ -381,7 +381,18 @@ def _ground_draft_references(
         col_norm_map[norm] = c
 
     def _resolve_ref(ref: Any) -> None:
-        """Try to resolve a SemanticColumnReference."""
+        """Try to resolve a SemanticColumnReference-like object."""
+        if ref is None:
+            return
+
+        nested_column = getattr(ref, "column", None)
+        if nested_column is not None and not hasattr(ref, "resolved_column"):
+            _resolve_ref(nested_column)
+            return
+
+        if not hasattr(ref, "resolved_column") or not hasattr(ref, "reference_text"):
+            return
+
         if ref.resolved_column is not None:
             return
 
@@ -413,7 +424,8 @@ def _ground_draft_references(
             return
 
     from finflow_agent.models.draft import (
-        FilterAction, ProjectAction, DropAction, SortAction, RenameAction,
+        FilterAction, ProjectAction, DropAction, SortAction, RenameAction, VisualizeAction,
+        VisualizationMeasure,
     )
 
     for action in draft.actions:
@@ -433,16 +445,32 @@ def _ground_draft_references(
         elif isinstance(action, RenameAction):
             for col_ref, _ in action.mappings:
                 _resolve_ref(col_ref)
+        elif isinstance(action, VisualizeAction):
+            if action.x is not None:
+                _resolve_ref(action.x)
+            if action.series is not None:
+                _resolve_ref(action.series)
+            if isinstance(action.y, VisualizationMeasure) and action.y.column is not None:
+                _resolve_ref(action.y.column)
+            elif action.y is not None:
+                _resolve_ref(action.y)
 
 
 def _has_unresolved_references(draft: Any) -> bool:
     """Check if the draft has any unresolved column references."""
     from finflow_agent.models.draft import (
-        FilterAction, ProjectAction, DropAction, SortAction, RenameAction,
-        ReferenceKind,
+        FilterAction, ProjectAction, DropAction, SortAction, RenameAction, VisualizeAction,
+        VisualizationMeasure, ReferenceKind,
     )
 
     def _is_unresolved(ref: Any) -> bool:
+        if ref is None:
+            return False
+        nested_column = getattr(ref, "column", None)
+        if nested_column is not None and not hasattr(ref, "resolved_column"):
+            return _is_unresolved(nested_column)
+        if not hasattr(ref, "resolved_column"):
+            return False
         # Generic references that are unresolved count as unresolved
         return ref.resolved_column is None
 
@@ -468,6 +496,15 @@ def _has_unresolved_references(draft: Any) -> bool:
             for col_ref, _ in action.mappings:
                 if _is_unresolved(col_ref):
                     return True
+        elif isinstance(action, VisualizeAction):
+            if action.x is not None and _is_unresolved(action.x):
+                return True
+            if action.series is not None and _is_unresolved(action.series):
+                return True
+            if isinstance(action.y, VisualizationMeasure) and action.y.column is not None and _is_unresolved(action.y.column):
+                return True
+            elif action.y is not None and _is_unresolved(action.y):
+                return True
 
     return False
 
@@ -487,7 +524,7 @@ def _draft_to_legacy_dict(
 ) -> dict[str, Any] | None:
     """Convert a SemanticIntentDraft to the backend's legacy canonical intent dict."""
     from finflow_agent.models.draft import (
-        FilterAction, ProjectAction, DropAction, SortAction, RenameAction,
+        FilterAction, ProjectAction, DropAction, SortAction, RenameAction, VisualizeAction,
     )
 
     actions: list[dict[str, Any]] = []
@@ -542,7 +579,7 @@ def _draft_to_legacy_dict(
 def _convert_action(action: Any, source_columns: list[str]) -> dict[str, Any] | None:
     """Convert a single DraftAction to a legacy action dict."""
     from finflow_agent.models.draft import (
-        FilterAction, ProjectAction, DropAction, SortAction, RenameAction,
+        FilterAction, ProjectAction, DropAction, SortAction, RenameAction, VisualizeAction,
     )
 
     if isinstance(action, ProjectAction):
@@ -555,6 +592,8 @@ def _convert_action(action: Any, source_columns: list[str]) -> dict[str, Any] | 
         return _convert_sort(action)
     elif isinstance(action, RenameAction):
         return _convert_rename(action)
+    elif isinstance(action, VisualizeAction):
+        return _convert_visualize(action)
     return None
 
 
@@ -623,6 +662,67 @@ def _convert_rename(action: Any) -> dict[str, Any]:
             "target_name": new_name,
         })
     return {"kind": "rename_columns", "mapping": mapping}
+
+
+def _convert_visualize(action: Any) -> dict[str, Any]:
+    """Convert VisualizeAction -> legacy visualize dict while preserving semantics."""
+    payload: dict[str, Any] = {
+        "kind": "visualize",
+        "chart_type": action.chart_type,
+        "fields": [],
+    }
+
+    if action.x is not None:
+        payload["x"] = _ref_to_legacy(action.x)
+        payload["fields"].append(payload["x"])
+
+    if action.series is not None:
+        payload["series"] = _ref_to_legacy(action.series)
+        payload["fields"].append(payload["series"])
+
+    if action.y is not None:
+        if hasattr(action.y, "function"):
+            measure: dict[str, Any] = {
+                "function": action.y.function,
+                "output_name": action.y.output_name,
+            }
+            payload["aggregation"] = action.y.function
+            if action.y.column is not None:
+                measure["column"] = _ref_to_legacy(action.y.column)
+                payload["measure"] = measure["column"]
+            payload["y"] = measure
+            if action.y.output_name:
+                payload["output_field"] = action.y.output_name
+        else:
+            payload["y"] = _ref_to_legacy(action.y)
+
+    group_by: list[dict[str, Any]] = []
+    if "x" in payload:
+        group_by.append(payload["x"])
+    if "series" in payload:
+        group_by.append(payload["series"])
+    if group_by:
+        payload["group_by"] = group_by
+
+    if getattr(action, "options", None) is not None:
+        options = action.options
+        if options.bar_mode is not None:
+            payload["bar_mode"] = options.bar_mode
+        if options.show_legend is not None:
+            payload["show_legend"] = options.show_legend
+        if options.show_data_labels is not None:
+            payload["show_data_labels"] = options.show_data_labels
+        if options.title is not None:
+            payload["title"] = options.title
+        if options.x_axis_title is not None:
+            payload["x_axis_title"] = options.x_axis_title
+        if options.y_axis_title is not None:
+            payload["y_axis_title"] = options.y_axis_title
+
+    if getattr(action, "original_description", None):
+        payload["description"] = action.original_description
+
+    return payload
 
 
 def _ref_to_legacy(ref: Any) -> dict[str, Any]:

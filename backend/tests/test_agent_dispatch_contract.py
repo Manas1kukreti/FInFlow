@@ -102,6 +102,54 @@ def _resolved_canonical_intent() -> dict:
     }
 
 
+def _resolved_visualize_canonical_intent() -> dict:
+    return {
+        "schema_version": "2.0",
+        "intent_id": "intent-viz-1",
+        "intent_revision": 1,
+        "intent_hash": "hash-viz-1",
+        "parent_intent_id": None,
+        "original_prompt": "Generate bar chart for education and pie chart for home ownership",
+        "normalized_prompt": "generate bar chart for education and pie chart for home ownership",
+        "resolution_status": "resolved",
+        "decision": "visualize",
+        "evidence": [],
+        "alternatives_considered": [],
+        "actions": [
+            {
+                "kind": "visualize",
+                "chart_type": "bar",
+                "x": {
+                    "raw_reference": "education",
+                    "resolved_column": "education_level",
+                    "resolution_method": "semantic_concept",
+                    "resolved_columns": ["education_level"],
+                    "candidate_columns": [],
+                    "evidence": [],
+                },
+                "group_by": [
+                    {
+                        "raw_reference": "education",
+                        "resolved_column": "education_level",
+                        "resolution_method": "semantic_concept",
+                        "resolved_columns": ["education_level"],
+                        "candidate_columns": [],
+                        "evidence": [],
+                    }
+                ],
+                "aggregation": "count",
+                "output_field": "count",
+            }
+        ],
+        "output_format": "xlsx",
+        "assumptions": [],
+        "repair_notes": [],
+        "dataframe_profile": {"source_columns": ["education_level", "home_ownership"]},
+        "capability_version": "backend.capability.1",
+        "capability_snapshot": {},
+    }
+
+
 def test_agent_dispatcher_sends_file_id_not_file_path(monkeypatch):
     async def run() -> tuple[str, dict, bool, str, str]:
         with tempfile.TemporaryDirectory(dir=_repo_root()) as temp_dir:
@@ -239,6 +287,62 @@ def test_agent_payload_matches_agent_service_job_payload(monkeypatch):
         "output_format",
         "audit_context",
     ]
+
+
+def test_agent_dispatcher_normalizes_visualize_refs_for_transport(monkeypatch):
+    async def run() -> dict:
+        with tempfile.TemporaryDirectory(dir=_repo_root()) as temp_dir:
+            upload_dir = Path(temp_dir) / "uploads"
+            upload_dir.mkdir()
+            stored_file = upload_dir / "job-input.csv"
+            stored_file.write_text("a,b\n1,2\n", encoding="utf-8")
+
+            submission = Submission(
+                id=uuid4(),
+                file_name="job-input.csv",
+                file_path=str(stored_file),
+                file_size_bytes=10,
+                original_filename="job-input.csv",
+                instruction="Generate bar chart for education and pie chart for home ownership",
+                output_format="XLSX",
+                user_id=uuid4(),
+                version_number=1,
+                status=SubmissionStatus.queued,
+            )
+            submission.canonical_intent = _resolved_visualize_canonical_intent()
+
+            fake_redis = FakeRedis()
+            fake_db = FakeDbSession(submission)
+            data_profile = type("Profile", (), {"id": uuid4()})()
+            revision_record = type("Revision", (), {"id": uuid4(), "created_at": None, "canonical_intent": submission.canonical_intent})()
+
+            async def fake_create_pool(*_args, **_kwargs):
+                return fake_redis
+
+            async def fake_load_profile(*_args, **_kwargs):
+                return data_profile
+
+            async def fake_latest_revision(*_args, **_kwargs):
+                return revision_record
+
+            monkeypatch.setattr(agent_dispatcher, "create_pool", fake_create_pool)
+            monkeypatch.setattr(agent_dispatcher, "AsyncSessionLocal", lambda: FakeSessionManager(fake_db))
+            monkeypatch.setattr(agent_dispatcher, "load_latest_data_profile", fake_load_profile)
+            monkeypatch.setattr(agent_dispatcher, "latest_intent_revision_for_submission", fake_latest_revision)
+            monkeypatch.setattr(
+                agent_dispatcher,
+                "get_settings",
+                lambda: type("Settings", (), {"redis_url": "redis://localhost:6379/0"})(),
+            )
+
+            await agent_dispatcher.enqueue_submission_dispatch(submission.id)
+            return fake_redis.jobs[0][1]["canonical_intent"]
+
+    canonical_envelope = asyncio.run(run())
+    visualize = canonical_envelope["intent"]["actions"][0]
+
+    assert visualize["x"] == "education_level"
+    assert visualize["group_by"] == ["education_level"]
 
 
 def test_shared_upload_dir_contract_documented():

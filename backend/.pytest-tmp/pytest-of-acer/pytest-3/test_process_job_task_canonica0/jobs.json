@@ -1,0 +1,65 @@
+{
+  "agent:canon-123": {
+    "job_id": "agent:canon-123",
+    "submission_id": "canon-123",
+    "status": "FAILED",
+    "payload": {
+      "submission_id": "canon-123",
+      "file_id": "sample.csv",
+      "file_name": "sample.csv",
+      "resolved_file_path": "C:\\Users\\acer\\Documents\\agentic_Ai-main\\backend\\.pytest-tmp\\pytest-of-acer\\pytest-3\\test_process_job_task_canonica0\\sample.csv",
+      "output_format": "csv",
+      "audit_context": {
+        "original_instruction": "Clean the data and return all columns."
+      },
+      "canonical_intent": {
+        "schema_version": "1.0",
+        "intent_id": "env-1",
+        "intent_revision": 1,
+        "intent_hash": "env-hash",
+        "parent_intent_id": null,
+        "original_instruction": "Clean the data and return all columns.",
+        "intent": {
+          "schema_version": "2.0",
+          "intent_id": "intent-1",
+          "intent_revision": 1,
+          "intent_hash": "intent-hash",
+          "parent_intent_id": null,
+          "original_prompt": "Clean the data and return all columns.",
+          "normalized_prompt": "clean the data and return all columns",
+          "resolution_status": "resolved",
+          "decision": "clean",
+          "evidence": [],
+          "alternatives_considered": [],
+          "actions": [
+            {
+              "kind": "clean",
+              "mode": "safe_default",
+              "operations": []
+            }
+          ],
+          "output_format": "csv",
+          "assumptions": [],
+          "repair_notes": [],
+          "dataframe_profile": {
+            "source_columns": [
+              "amount",
+              "status"
+            ]
+          },
+          "capability_version": "agent.capability.1",
+          "capability_snapshot": {}
+        },
+        "extractor_version": "1.0",
+        "normalizer_version": "1.0",
+        "grounding_version": "1.0",
+        "capability_version": "agent.capability.1",
+        "capability_snapshot": {},
+        "repair_notes": [],
+        "assumptions": []
+      }
+    },
+    "result": null,
+    "error": "Unhandled worker exception while processing job: assert {'compiled': ...revision': 1}} == {'compiled': True}\n  \n  Omitting 1 identical items, use -vv to show\n  Left contains 1 more item:\n  \u001b[0m{\u001b[33m'\u001b[39;49;00m\u001b[33mplan_metadata\u001b[39;49;00m\u001b[33m'\u001b[39;49;00m: {\u001b[33m'\u001b[39;49;00m\u001b[33mcompiler_version\u001b[39;49;00m\u001b[33m'\u001b[39;49;00m: \u001b[33m'\u001b[39;49;00m\u001b[33m1.0\u001b[39;49;00m\u001b[33m'\u001b[39;49;00m,\u001b[90m\u001b[39;49;00m\n                     \u001b[33m'\u001b[39;49;00m\u001b[33mintent_hash\u001b[39;49;00m\u001b[33m'\u001b[39;49;00m: \u001b[33m'\u001b[39;49;00m\u001b[33menv-hash\u001b[39;49;00m\u001b[33m'\u001b[39;49;00m,\u001b[90m\u001b[39;49;00m\n                     \u001b[33m'\u001b[39;49;00m\u001b[33mintent_id\u001b[39;49;00m\u001b[33m'\u001b[39;49;00m: \u001b[33m'\u001b[39;49;00m\u001b[33menv-1\u001b[39;49;00m\u001b[33m'\u001b[39;49;00m,\u001b[90m\u001b[39;49;00m\n   ...\n  \n  ...Full output truncated (12 lines hidden), use '-vv' to show"
+  }
+}

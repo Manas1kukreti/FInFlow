@@ -22,6 +22,7 @@ from finflow_agent.models.canonical import (
     ResolvedProjectAction,
     ResolvedRenameAction,
     ResolvedSortAction,
+    ResolvedVisualizeAction,
 )
 from finflow_agent.models.envelope import (
     IntentEnvelope,
@@ -56,6 +57,9 @@ from finflow_agent.models.draft import (
     SemanticIntentDraft,
     SortAction,
     UnresolvedPredicate,
+    VisualizeAction,
+    VisualizationMeasure,
+    VisualizationOptions,
 )
 from finflow_agent.models.pretty_printer import pretty_print_draft
 from finflow_agent.models.upcasters import (
@@ -90,6 +94,7 @@ __all__ = [
     "ResolvedProjectAction",
     "ResolvedRenameAction",
     "ResolvedSortAction",
+    "ResolvedVisualizeAction",
     "ResolutionOrigin",
     "ResolutionRecord",
     "ResolutionStatus",
@@ -104,4 +109,7 @@ __all__ = [
     "UnresolvedPredicate",
     "UpcasterError",
     "upcast_canonical_intent",
+    "VisualizeAction",
+    "VisualizationMeasure",
+    "VisualizationOptions",
 ]

@@ -171,11 +171,11 @@ class FilterOperationPlan(BaseModel):
 # -------------------------------------------------------------------
 class CalculationOperation(BaseModel):
     type: Literal["sum", "mean", "median", "min", "max", "count", "count_distinct", 
-                  "variance", "standard_deviation", "group_sum", "group_mean", "group_count", 
+                  "mode", "variance", "standard_deviation", "percentage", "group_sum", "group_mean", "group_median", "group_count",
                   "running_total", "percentage_change", "difference", "ratio", "absolute_value",
                   "conditional_percentage", "quarterly_sum", "quarterly_mean", "quarterly_count",
                   "cross_tab_sum", "cross_tab_mean", "cross_tab_count"]
-    column: str
+    column: Optional[str] = None
     output_column: Optional[str] = None
     group_by: Optional[List[str]] = None
     secondary_column: Optional[str] = None  # For ratio, difference, percentage_change
@@ -195,16 +195,25 @@ class CalculationOperation(BaseModel):
         if not isinstance(data, dict):
             return data
         t = data.get("type")
+        if t not in {"group_count"} and not data.get("column"):
+            raise ValueError(f"Operator '{t}' requires a column.")
         if t in ["group_sum", "group_mean", "group_count"]:
             gb = data.get("group_by")
             if not gb or not isinstance(gb, list) or len(gb) == 0:
                 raise ValueError(f"Operator '{t}' requires non-empty group_by columns.")
+        elif t == "group_median":
+            gb = data.get("group_by")
+            if not gb or not isinstance(gb, list) or len(gb) == 0:
+                raise ValueError("Operator 'group_median' requires non-empty group_by columns.")
         elif t in ["running_total", "percentage_change"]:
             if not data.get("sort_by"):
                 raise ValueError(f"Operator '{t}' requires a sort_by column.")
         elif t in ["ratio", "difference"]:
             if not data.get("secondary_column"):
                 raise ValueError(f"Operator '{t}' requires secondary_column.")
+        elif t == "percentage":
+            if not data.get("filter_column") or data.get("filter_value") is None:
+                raise ValueError("percentage requires filter_column and filter_value.")
         elif t == "conditional_percentage":
             if not data.get("filter_column") or data.get("filter_value") is None:
                 raise ValueError("conditional_percentage requires filter_column and filter_value.")
@@ -225,9 +234,27 @@ class ChartSpec(BaseModel):
     y: Union[str, List[str]]
     title: str
     group_by: Optional[List[str]] = None
+    series: Optional[str] = None
     measure: Optional[str] = None
     aggregation: Optional[Literal["count", "sum", "mean"]] = None
     output_field: Optional[str] = None
+    bar_mode: Optional[Literal["grouped", "stacked"]] = None
+    show_legend: Optional[bool] = None
+    show_data_labels: Optional[bool] = None
+    x_axis_title: Optional[str] = None
+    y_axis_title: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_chart_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        chart_type = str(normalized.get("type") or "").strip().lower()
+        if chart_type == "stacked_bar":
+            normalized["type"] = "bar"
+            normalized.setdefault("bar_mode", "stacked")
+        return normalized
 
 class VisualizationOperationPlan(BaseModel):
     charts: List[ChartSpec]

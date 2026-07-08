@@ -287,6 +287,59 @@ export async function fetchClarificationStatus(submissionId) {
   return response.data;
 }
 
+export async function fetchChatDatasets() {
+  const response = await api.get("/employee-chat/datasets");
+  return response.data;
+}
+
+export async function fetchChatConversations() {
+  const response = await api.get("/employee-chat/conversations");
+  return response.data;
+}
+
+export async function createChatConversation(payload = {}) {
+  const response = await api.post("/employee-chat/conversations", payload);
+  return response.data;
+}
+
+export async function fetchChatConversation(conversationId) {
+  const response = await api.get(`/employee-chat/conversations/${conversationId}`);
+  return response.data;
+}
+
+export async function sendChatMessage(conversationId, payload) {
+  const response = await api.post(`/employee-chat/conversations/${conversationId}/messages`, payload);
+  return response.data;
+}
+
+export async function fetchChatExecution(executionId) {
+  const response = await api.get(`/employee-chat/executions/${executionId}`);
+  return response.data;
+}
+
+export async function cancelChatExecution(executionId) {
+  const response = await api.post(`/employee-chat/executions/${executionId}/cancel`);
+  return response.data;
+}
+
+export async function downloadChatExecutionResult(executionId, format = "csv") {
+  const response = await api.get(`/employee-chat/executions/${executionId}/download`, {
+    params: { format },
+    responseType: "blob",
+  });
+
+  const contentDisposition = response.headers["content-disposition"] || "";
+  const filename = parseDownloadFilename(contentDisposition) || `employee-chat-${executionId}.${format}`;
+  const blobUrl = window.URL.createObjectURL(response.data);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(blobUrl);
+}
+
 export async function confirmInterpretation(jobId, reason = null) {
   const response = await api.post(`/uploads/${jobId}/confirm-interpretation`, { reason });
   return response.data;

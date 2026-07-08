@@ -133,11 +133,25 @@ class CalculateIntent(BaseModel):
 
 
 class VisualizeIntent(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow")
 
     kind: Literal["visualize"]
     chart_type: str | None = None
     fields: list[UnresolvedColumnReference] = Field(default_factory=list)
+    x: UnresolvedColumnReference | str | None = None
+    y: dict[str, Any] | UnresolvedColumnReference | str | None = None
+    series: UnresolvedColumnReference | str | None = None
+    group_by: list[UnresolvedColumnReference | str] = Field(default_factory=list)
+    aggregation: str | None = None
+    measure: dict[str, Any] | UnresolvedColumnReference | str | None = None
+    output_field: str | None = None
+    bar_mode: str | None = None
+    show_legend: bool | None = None
+    show_data_labels: bool | None = None
+    title: str | None = None
+    x_axis_title: str | None = None
+    y_axis_title: str | None = None
+    description: str | None = None
 
 
 class ReportIntent(BaseModel):
@@ -401,7 +415,6 @@ def _try_semantic_extraction(
             new_result = _repair_select_all_projection(new_result, instruction=instruction, source_columns=source_columns)
             new_result = _repair_profile_grounded_references(new_result, dataframe_profile, submission_id=submission_id)
             new_result = _repair_null_row_cleanup(new_result, instruction=instruction)
-            new_result = _repair_missing_clean_action(new_result, instruction=instruction)
             new_result = _repair_missing_clean_operations(new_result, instruction=instruction)
             new_result = _repair_filter_mode(new_result, instruction=instruction)
             new_result = _repair_missing_calculate_action(
@@ -491,10 +504,29 @@ def _semantic_actions_to_typed(
                 typed.append(CalculateIntent(kind="calculate", operations=action.get("operations", [])))
             elif kind == "visualize":
                 fields = _dict_fields_to_unresolved(action.get("fields", []), source_columns)
+                group_by = []
+                for item in action.get("group_by", []):
+                    coerced = _coerce_visual_reference(item, source_columns)
+                    if coerced is not None:
+                        group_by.append(coerced)
                 typed.append(VisualizeIntent(
                     kind="visualize",
                     chart_type=action.get("chart_type"),
                     fields=fields,
+                    x=_coerce_visual_reference(action.get("x"), source_columns),
+                    y=_coerce_visual_measure(action.get("y"), source_columns),
+                    series=_coerce_visual_reference(action.get("series"), source_columns),
+                    group_by=group_by,
+                    aggregation=action.get("aggregation"),
+                    measure=_coerce_visual_measure(action.get("measure"), source_columns),
+                    output_field=action.get("output_field"),
+                    bar_mode=action.get("bar_mode"),
+                    show_legend=action.get("show_legend"),
+                    show_data_labels=action.get("show_data_labels"),
+                    title=action.get("title"),
+                    x_axis_title=action.get("x_axis_title"),
+                    y_axis_title=action.get("y_axis_title"),
+                    description=action.get("description"),
                 ))
             elif kind == "report":
                 typed.append(ReportIntent(kind="report", sections=action.get("sections", [])))
@@ -550,6 +582,33 @@ def _single_dict_to_unresolved(
             if str(item).strip()
         ],
     )
+
+
+def _coerce_visual_reference(
+    value: dict[str, Any] | str | Any,
+    source_columns: list[str],
+) -> UnresolvedColumnReference | str | None:
+    if isinstance(value, dict):
+        return _single_dict_to_unresolved(value, source_columns)
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _coerce_visual_measure(
+    value: dict[str, Any] | str | Any,
+    source_columns: list[str],
+) -> dict[str, Any] | UnresolvedColumnReference | str | None:
+    if isinstance(value, dict):
+        if any(key in value for key in ("function", "column", "output_name")):
+            measure = dict(value)
+            if isinstance(measure.get("column"), dict):
+                measure["column"] = _single_dict_to_unresolved(measure["column"], source_columns)
+            return measure
+        return _single_dict_to_unresolved(value, source_columns)
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
 
 
 def _dict_conditions_to_typed(
@@ -1222,6 +1281,20 @@ def _extract_calculate_action(
 
     operations: list[dict] = []
 
+    ratio_group_ref = _extract_ratio_group_reference(
+        normalized_prompt,
+        source_columns,
+        role_columns or infer_column_roles(source_columns),
+    )
+    if ratio_group_ref is not None:
+        operations.append(
+            {
+                "type": "group_count",
+                "group_by": [ratio_group_ref.model_dump(mode="json")],
+                "output_column": _suggest_calculation_output_column("group_count", ratio_group_ref),
+            }
+        )
+
     # --- Percentage-based demographic calculations ---
     pct_match = re.search(
         r"\bpercentage\s+of\s+(?P<denom_group>\w+)?\s*(?:employees?|workers?|staff|people|records?|rows?)?\s*"
@@ -1323,6 +1396,34 @@ def _extract_calculate_action(
         return None
 
     return CalculateIntent(kind="calculate", operations=operations)
+
+
+def _extract_ratio_group_reference(
+    normalized_prompt: str,
+    source_columns: list[str],
+    role_columns: dict[str, list[str]],
+) -> UnresolvedColumnReference | None:
+    """Ground a ratio request to a categorical grouping column.
+
+    The current schema mostly uses ratio/pie prompts to mean a grouped count
+    over a categorical field such as gender.
+    """
+    if not re.search(r"\b(?:ratio|share|distribution|breakdown)\b", normalized_prompt, re.IGNORECASE):
+        return None
+
+    if re.search(r"\b(?:male|female|gender)\b", normalized_prompt, re.IGNORECASE):
+        group_ref = _ground_column_reference("gender", source_columns, role_columns)
+        if group_ref is not None and group_ref.resolved_column:
+            return group_ref
+
+    for candidate_role in ("gender", "status", "marital_status", "merchant"):
+        columns = role_columns.get(candidate_role)
+        if columns and len(columns) == 1:
+            group_ref = _ground_column_reference(candidate_role, source_columns, role_columns)
+            if group_ref is not None and group_ref.resolved_column:
+                return group_ref
+
+    return None
 
 
 def _find_column_for_value(value: str, source_columns: list[str], profile: dict | None) -> str | None:
@@ -3196,6 +3297,20 @@ def _iter_grounded_references(actions: list[IntentAction]) -> list[dict[str, Any
         elif isinstance(action, VisualizeIntent):
             for field in action.fields:
                 grounded.append(field.model_dump(mode="json"))
+            for ref in (action.x, action.series):
+                if isinstance(ref, UnresolvedColumnReference):
+                    grounded.append(ref.model_dump(mode="json"))
+            for ref in action.group_by:
+                if isinstance(ref, UnresolvedColumnReference):
+                    grounded.append(ref.model_dump(mode="json"))
+            if isinstance(action.y, UnresolvedColumnReference):
+                grounded.append(action.y.model_dump(mode="json"))
+            elif isinstance(action.y, dict) and isinstance(action.y.get("column"), UnresolvedColumnReference):
+                grounded.append(action.y["column"].model_dump(mode="json"))
+            if isinstance(action.measure, UnresolvedColumnReference):
+                grounded.append(action.measure.model_dump(mode="json"))
+            elif isinstance(action.measure, dict) and isinstance(action.measure.get("column"), UnresolvedColumnReference):
+                grounded.append(action.measure["column"].model_dump(mode="json"))
     return grounded
 
 

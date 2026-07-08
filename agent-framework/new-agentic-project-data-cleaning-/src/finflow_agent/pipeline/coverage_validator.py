@@ -34,6 +34,8 @@ from finflow_agent.models.draft import (
     SemanticColumnReference,
     SemanticIntentDraft,
     SortAction,
+    VisualizeAction,
+    VisualizationMeasure,
 )
 from finflow_agent.models.envelope import ShadowComparisonMetric
 from finflow_agent.models.provenance import PromptSpanProvenance
@@ -534,6 +536,17 @@ class CoverageValidator:
                 for predicate in group.predicates:
                     refs.append(predicate.field_ref)
             return refs
+        elif isinstance(action, VisualizeAction):
+            refs = []
+            if action.x is not None:
+                refs.append(action.x)
+            if isinstance(action.y, SemanticColumnReference):
+                refs.append(action.y)
+            elif isinstance(action.y, VisualizationMeasure) and action.y.column is not None:
+                refs.append(action.y.column)
+            if action.series is not None:
+                refs.append(action.series)
+            return refs
         return []
 
     def _collect_provenance_spans(
@@ -574,6 +587,15 @@ class CoverageValidator:
             elif isinstance(action, RenameAction):
                 for mapping in action.mappings:
                     _extract_spans_from_provenance(mapping[0].provenance)
+            elif isinstance(action, VisualizeAction):
+                if action.x is not None:
+                    _extract_spans_from_provenance(action.x.provenance)
+                if isinstance(action.y, SemanticColumnReference):
+                    _extract_spans_from_provenance(action.y.provenance)
+                elif isinstance(action.y, VisualizationMeasure) and action.y.column is not None:
+                    _extract_spans_from_provenance(action.y.column.provenance)
+                if action.series is not None:
+                    _extract_spans_from_provenance(action.series.provenance)
 
         # Ambiguity marker provenance
         for amb in draft.ambiguities:

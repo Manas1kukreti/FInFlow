@@ -121,10 +121,18 @@ class VisualizeIntent(BaseModel):
     kind: Literal["visualize"]
     chart_type: str | None = None
     fields: list[UnresolvedColumnReference] = Field(default_factory=list)
+    x: str | None = None
+    series: str | None = None
     group_by: list[str] | None = None
     measure: str | None = None
     aggregation: Literal["count", "sum", "mean"] | None = None
     output_field: str | None = None
+    bar_mode: Literal["grouped", "stacked"] | None = None
+    show_legend: bool | None = None
+    show_data_labels: bool | None = None
+    title: str | None = None
+    x_axis_title: str | None = None
+    y_axis_title: str | None = None
 
 
 class ReportIntent(BaseModel):

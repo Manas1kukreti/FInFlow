@@ -67,6 +67,19 @@ def calc_count_distinct(df: pd.DataFrame, op: CalculationOperation) -> Dict[str,
     val = int(df[op.column].nunique())
     return {"metrics": {out_col: val}}
 
+def calc_mode(df: pd.DataFrame, op: CalculationOperation) -> Dict[str, Any]:
+    out_col = op.output_column or f"mode_{op.column}"
+    series = df[op.column].dropna()
+    if series.empty:
+        return {"metrics": {out_col: None}}
+    mode_values = series.mode(dropna=True)
+    if mode_values.empty:
+        return {"metrics": {out_col: None}}
+    value = mode_values.iloc[0]
+    if hasattr(value, "item"):
+        value = value.item()
+    return {"metrics": {out_col: value}}
+
 def calc_variance(df: pd.DataFrame, op: CalculationOperation) -> Dict[str, Any]:
     _check_numeric(df, op.column)
     out_col = op.output_column or f"variance_{op.column}"
@@ -97,11 +110,23 @@ def calc_group_mean(df: pd.DataFrame, op: CalculationOperation) -> Dict[str, Any
     grouped[out_col] = _round_series_if_currency(grouped[out_col], out_col)
     return {"df": grouped}
 
+def calc_group_median(df: pd.DataFrame, op: CalculationOperation) -> Dict[str, Any]:
+    _check_numeric(df, op.column)
+    out_col = op.output_column or f"median_{op.column}"
+    grouped = df.groupby(op.group_by, as_index=False)[op.column].median()
+    grouped.rename(columns={op.column: out_col}, inplace=True)
+    grouped[out_col] = _round_series_if_currency(grouped[out_col], out_col)
+    return {"df": grouped}
+
 def calc_group_count(df: pd.DataFrame, op: CalculationOperation) -> Dict[str, Any]:
-    out_col = op.output_column or f"count_{op.column}"
+    out_col = op.output_column or (f"count_{op.column}" if op.column else "record_count")
     grouped = df.groupby(op.group_by, as_index=False).size()
     grouped.rename(columns={'size': out_col}, inplace=True)
     return {"df": grouped}
+
+def calc_percentage(df: pd.DataFrame, op: CalculationOperation) -> Dict[str, Any]:
+    """Alias for conditional percentage with optional denominator filters."""
+    return calc_conditional_percentage(df, op)
 
 def calc_running_total(df: pd.DataFrame, op: CalculationOperation) -> Dict[str, Any]:
     _check_numeric(df, op.column)
@@ -398,10 +423,13 @@ CALCULATION_HANDLERS = {
     "max": calc_max,
     "count": calc_count,
     "count_distinct": calc_count_distinct,
+    "mode": calc_mode,
     "variance": calc_variance,
     "standard_deviation": calc_standard_deviation,
+    "percentage": calc_percentage,
     "group_sum": calc_group_sum,
     "group_mean": calc_group_mean,
+    "group_median": calc_group_median,
     "group_count": calc_group_count,
     "running_total": calc_running_total,
     "percentage_change": calc_percentage_change,

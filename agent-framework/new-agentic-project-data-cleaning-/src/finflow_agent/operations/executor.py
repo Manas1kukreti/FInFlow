@@ -434,10 +434,20 @@ def execute_project_columns_plan(df: pd.DataFrame, plan: Any) -> ExecutionOutput
 
     Selects a subset of columns from the DataFrame.
     """
-    raise NotImplementedError(
-        "project_columns action handler is not yet implemented. "
-        "Add implementation in executor.py."
-    )
+    output = ExecutionOutput(data=df.copy())
+    columns = []
+    for ref in getattr(plan, "requested_fields", []) or []:
+        if isinstance(ref, str):
+            columns.append(ref)
+        elif isinstance(ref, dict):
+            resolved = ref.get("resolved_column") or ref.get("raw_reference")
+            if resolved:
+                columns.append(str(resolved))
+    columns = [column for column in columns if column in output.data.columns]
+    if columns:
+        output.data = output.data.loc[:, columns]
+    output.summary = f"Projected {len(columns)} columns."
+    return output
 
 
 def execute_drop_columns_plan(df: pd.DataFrame, plan: Any) -> ExecutionOutput:
@@ -445,10 +455,20 @@ def execute_drop_columns_plan(df: pd.DataFrame, plan: Any) -> ExecutionOutput:
 
     Drops specified columns from the DataFrame.
     """
-    raise NotImplementedError(
-        "drop_columns action handler is not yet implemented. "
-        "Add implementation in executor.py."
-    )
+    output = ExecutionOutput(data=df.copy())
+    columns = []
+    for ref in getattr(plan, "requested_fields", []) or []:
+        if isinstance(ref, str):
+            columns.append(ref)
+        elif isinstance(ref, dict):
+            resolved = ref.get("resolved_column") or ref.get("raw_reference")
+            if resolved:
+                columns.append(str(resolved))
+    columns = [column for column in columns if column in output.data.columns]
+    if columns:
+        output.data = output.data.drop(columns=columns, errors="ignore")
+    output.summary = f"Dropped {len(columns)} columns."
+    return output
 
 
 def execute_rename_columns_plan(df: pd.DataFrame, plan: Any) -> ExecutionOutput:
@@ -456,10 +476,20 @@ def execute_rename_columns_plan(df: pd.DataFrame, plan: Any) -> ExecutionOutput:
 
     Renames specified columns in the DataFrame.
     """
-    raise NotImplementedError(
-        "rename_columns action handler is not yet implemented. "
-        "Add implementation in executor.py."
-    )
+    output = ExecutionOutput(data=df.copy())
+    mapping = {}
+    for item in getattr(plan, "mapping", []) or []:
+        if isinstance(item, dict):
+            source = item.get("source")
+            target = item.get("target_name")
+            if isinstance(source, dict):
+                source = source.get("resolved_column") or source.get("raw_reference")
+            if source and target:
+                mapping[str(source)] = str(target)
+    if mapping:
+        output.data = output.data.rename(columns=mapping)
+    output.summary = f"Renamed {len(mapping)} columns."
+    return output
 
 
 def execute_sort_rows_plan(df: pd.DataFrame, plan: Any) -> ExecutionOutput:
@@ -467,10 +497,21 @@ def execute_sort_rows_plan(df: pd.DataFrame, plan: Any) -> ExecutionOutput:
 
     Sorts the DataFrame by specified columns.
     """
-    raise NotImplementedError(
-        "sort_rows action handler is not yet implemented. "
-        "Add implementation in executor.py."
-    )
+    output = ExecutionOutput(data=df.copy())
+    sort_keys = []
+    directions = []
+    for key in getattr(plan, "sort_keys", []) or []:
+        if isinstance(key, dict):
+            column = key.get("column")
+            if isinstance(column, dict):
+                column = column.get("resolved_column") or column.get("raw_reference")
+            if column:
+                sort_keys.append(str(column))
+                directions.append(str(key.get("direction", "asc")).lower() != "desc")
+    if sort_keys:
+        output.data = output.data.sort_values(by=sort_keys, ascending=directions[: len(sort_keys)], kind="mergesort")
+    output.summary = f"Sorted by {len(sort_keys)} key(s)."
+    return output
 
 
 def execute_limit_rows_plan(df: pd.DataFrame, plan: Any) -> ExecutionOutput:
@@ -478,10 +519,12 @@ def execute_limit_rows_plan(df: pd.DataFrame, plan: Any) -> ExecutionOutput:
 
     Limits the number of rows in the DataFrame.
     """
-    raise NotImplementedError(
-        "limit_rows action handler is not yet implemented. "
-        "Add implementation in executor.py."
-    )
+    output = ExecutionOutput(data=df.copy())
+    limit = int(getattr(plan, "limit", 0) or 0)
+    if limit > 0:
+        output.data = output.data.head(limit)
+    output.summary = f"Limited to {limit} rows."
+    return output
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -49,6 +50,70 @@ def _build_canonical_intent_envelope(submission: Submission, canonical_intent: d
         "created_at": created_at,
         "grounded_at": canonical_intent.get("grounded_at") or created_at,
     }
+
+
+def _resolved_visual_ref(value):
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if isinstance(value, dict):
+        resolved = str(value.get("resolved_column") or "").strip()
+        if resolved:
+            return resolved
+        raw = str(value.get("raw_reference") or "").strip()
+        return raw or None
+    return None
+
+
+def _normalize_visualize_action_for_transport(action: dict) -> dict:
+    normalized = dict(action)
+
+    x_value = _resolved_visual_ref(normalized.get("x"))
+    if x_value is not None:
+        normalized["x"] = x_value
+    elif "x" in normalized:
+        normalized["x"] = None
+
+    series_value = _resolved_visual_ref(normalized.get("series"))
+    if series_value is not None:
+        normalized["series"] = series_value
+    elif "series" in normalized:
+        normalized["series"] = None
+
+    measure_value = _resolved_visual_ref(normalized.get("measure"))
+    if measure_value is not None:
+        normalized["measure"] = measure_value
+    elif isinstance(normalized.get("measure"), dict):
+        normalized["measure"] = None
+
+    group_by = normalized.get("group_by")
+    if isinstance(group_by, list):
+        normalized["group_by"] = [
+            resolved
+            for item in group_by
+            if (resolved := _resolved_visual_ref(item))
+        ]
+
+    return normalized
+
+
+def _normalize_canonical_intent_for_transport(envelope: dict) -> dict:
+    transport_envelope = deepcopy(envelope)
+    intent = transport_envelope.get("intent")
+    if not isinstance(intent, dict):
+        return transport_envelope
+
+    actions = intent.get("actions")
+    if not isinstance(actions, list):
+        return transport_envelope
+
+    intent["actions"] = [
+        _normalize_visualize_action_for_transport(action)
+        if isinstance(action, dict) and action.get("kind") == "visualize"
+        else action
+        for action in actions
+    ]
+    return transport_envelope
 
 
 async def enqueue_submission_dispatch(submission_id: UUID | str, *, persist_revision: bool = True) -> None:
@@ -147,7 +212,7 @@ async def enqueue_submission_dispatch(submission_id: UUID | str, *, persist_revi
                 "grounded_at": canonical_intent.get("grounded_at"),
                 "capability_version": canonical_intent.get("capability_version"),
             }
-            payload["canonical_intent"] = canonical_intent
+            payload["canonical_intent"] = _normalize_canonical_intent_for_transport(canonical_intent)
 
             outbox = await create_dispatch_outbox(db, submission=submission, payload=payload)
             submission.status = SubmissionStatus.planning

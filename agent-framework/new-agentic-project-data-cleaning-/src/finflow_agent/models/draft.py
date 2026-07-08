@@ -256,8 +256,63 @@ class RenameAction(BaseModel):
     )
 
 
+class VisualizationMeasure(BaseModel):
+    """Requested measure for a visualization action."""
+
+    model_config = ConfigDict(strict=True)
+
+    function: Literal["count", "sum", "mean", "median", "min", "max"] = "count"
+    column: SemanticColumnReference | None = Field(
+        default=None,
+        description="Optional source column for the measure. Omitted for row counts.",
+    )
+    output_name: str | None = Field(
+        default=None,
+        description="Requested output label for the computed measure.",
+    )
+
+
+class VisualizationOptions(BaseModel):
+    """Presentation options captured during semantic extraction."""
+
+    model_config = ConfigDict(strict=True)
+
+    bar_mode: Literal["grouped", "stacked"] | None = None
+    show_legend: bool | None = None
+    show_data_labels: bool | None = None
+    title: str | None = None
+    x_axis_title: str | None = None
+    y_axis_title: str | None = None
+
+
+class VisualizeAction(BaseModel):
+    """Action representing a chart visualization request."""
+
+    model_config = ConfigDict(strict=True)
+
+    type: Literal["visualize"] = "visualize"
+    chart_type: Literal["auto", "bar", "line", "pie", "scatter", "histogram"] = "auto"
+    x: SemanticColumnReference | None = Field(
+        default=None,
+        description="Primary category/time column for the x-axis.",
+    )
+    y: VisualizationMeasure | SemanticColumnReference | None = Field(
+        default=None,
+        description="Measure request or direct y-axis field reference.",
+    )
+    series: SemanticColumnReference | None = Field(
+        default=None,
+        description="Optional secondary categorical field used as chart series.",
+    )
+    options: VisualizationOptions = Field(default_factory=VisualizationOptions)
+    original_description: str | None = None
+    provenance: list[ProvenanceRef] = Field(
+        ..., min_length=1, description="Provenance for the visualization action"
+    )
+
+
 DraftAction = Annotated[
-    Union[FilterAction, ProjectAction, DropAction, SortAction, RenameAction],
+    Union[FilterAction, ProjectAction, DropAction, SortAction, RenameAction, VisualizeAction],
     Field(discriminator="type"),
 ]
 """Discriminated union of all draft action types.

@@ -152,14 +152,15 @@ async def get_kpis(
         select(Submission.id)
         .where(*role_filters, *date_filters)
         .distinct()
-        .subquery()
+        .subquery("scoped_submission_ids")
     )
+    scoped_submission_ids_select = select(scoped_submission_ids.c.id)
 
     derived_status = _derived_submission_status_expr().label("status")
     status_rows = (
         await db.execute(
             select(derived_status, func.count(Submission.id).label("cnt"))
-            .where(Submission.id.in_(select(scoped_submission_ids)))
+            .where(Submission.id.in_(scoped_submission_ids_select))
             .group_by(derived_status)
         )
     ).all()
@@ -188,7 +189,7 @@ async def get_kpis(
         select(func.avg(func.extract("epoch", Submission.completed_at - Submission.uploaded_at)))
         .select_from(Submission)
         .where(
-            Submission.id.in_(select(scoped_submission_ids)),
+            Submission.id.in_(scoped_submission_ids_select),
             Submission.completed_at.is_not(None)
         )
     ) or 0.0
@@ -196,7 +197,7 @@ async def get_kpis(
     output_rows = (
         await db.execute(
             select(Submission.output_format, func.count(Submission.id).label("cnt"))
-            .where(Submission.id.in_(select(scoped_submission_ids)))
+            .where(Submission.id.in_(scoped_submission_ids_select))
             .group_by(Submission.output_format)
             .order_by(desc("cnt"))
         )
@@ -213,7 +214,7 @@ async def get_kpis(
     recent_submissions = (
         await db.execute(
             select(Submission)
-            .where(Submission.id.in_(select(scoped_submission_ids)))
+            .where(Submission.id.in_(scoped_submission_ids_select))
             .order_by(desc(Submission.uploaded_at))
             .limit(5)
         )
@@ -248,7 +249,7 @@ async def get_kpis(
                 Submission.completed_at,
                 Submission.summary,
             )
-            .where(Submission.id.in_(select(scoped_submission_ids)))
+            .where(Submission.id.in_(scoped_submission_ids_select))
             .order_by(desc(Submission.completed_at), desc(Submission.uploaded_at))
         )
     ).all()
@@ -409,13 +410,14 @@ async def _record_count_for_submission(db: AsyncSession, submission_id) -> int:
 
 
 async def _failure_reasons(db: AsyncSession, scoped_submission_ids) -> list[dict]:
+    scoped_submission_ids_select = select(scoped_submission_ids.c.id)
     rows = (
         await db.execute(
             select(Submission, SubmissionComment)
             .select_from(Submission)
             .join(SubmissionComment, SubmissionComment.submission_id == Submission.id)
             .where(
-                Submission.id.in_(scoped_submission_ids),
+                Submission.id.in_(scoped_submission_ids_select),
                 cast(Submission.status, String).in_([
                     SubmissionStatus.failed.value,
                     SubmissionStatus.callback_failed.value,

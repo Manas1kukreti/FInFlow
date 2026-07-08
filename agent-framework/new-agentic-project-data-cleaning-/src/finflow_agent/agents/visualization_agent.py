@@ -124,6 +124,15 @@ class VisualizationAgent:
                     source_result_id=source_result_id,
                     operation_id=operation_id,
                 )
+                chart_options = {
+                    "bar_mode": chart_config.get("bar_mode"),
+                    "show_legend": chart_config.get("show_legend"),
+                    "show_data_labels": chart_config.get("show_data_labels"),
+                    "x_axis_title": chart_config.get("x_axis_title"),
+                    "y_axis_title": chart_config.get("y_axis_title"),
+                }
+                spec.title = chart_config.get("title") or spec.title
+                spec.options.update({k: v for k, v in chart_options.items() if v is not None})
                 visualization_specs.append(spec.model_dump())
 
             # Determine overall status — always "success" to avoid blocking
@@ -285,10 +294,14 @@ class VisualizationAgent:
         """
         x_field = chart_config.get("x")
         y_field = chart_config.get("y")
+        series_field = chart_config.get("series")
 
         # If explicit fields provided, use them
         if x_field and x_field != "auto" and y_field and y_field != "auto":
-            return {"x": x_field, "y": y_field}
+            encoding = {"x": x_field, "y": y_field}
+            if series_field and series_field != "auto":
+                encoding["series"] = series_field
+            return encoding
 
         # Auto-detect encoding from field metadata
         fields = operation_result.get("fields", [])
@@ -325,6 +338,7 @@ class VisualizationAgent:
                 return {
                     "x": x["id"],
                     "y": y["id"],
+                    **({"series": series_field} if series_field else {}),
                 }
         else:
             # Bar, histogram, or auto: category x-axis, measure y-axis
@@ -346,8 +360,26 @@ class VisualizationAgent:
             return {
                 "x": string_fields[0]["id"],
                 "y": numeric_fields[0]["id"],
+                **({"series": series_field} if series_field else {}),
             }
 
+        return None
+
+    @staticmethod
+    def _resolve_column_name(df, raw_name: str | None) -> str | None:
+        if not raw_name:
+            return None
+        if raw_name in df.columns:
+            return raw_name
+        normalized = str(raw_name).strip().lower().replace(" ", "_")
+        for column in df.columns:
+            candidate = str(column).strip().lower().replace(" ", "_")
+            if candidate == normalized:
+                return str(column)
+        for column in df.columns:
+            candidate = str(column).strip().lower().replace(" ", "_")
+            if normalized in candidate or candidate in normalized:
+                return str(column)
         return None
 
     @staticmethod
@@ -363,22 +395,30 @@ class VisualizationAgent:
             return {"fields": [], "rows": []}
 
         group_by = chart_config.get("group_by")
-        measure = chart_config.get("measure")
+        measure = VisualizationAgent._resolve_column_name(df, chart_config.get("measure"))
         aggregation = chart_config.get("aggregation", "count")
-        x_field = chart_config.get("x", "")
+        x_field = VisualizationAgent._resolve_column_name(df, chart_config.get("x", ""))
+        series_field = VisualizationAgent._resolve_column_name(df, chart_config.get("series"))
         output_field = chart_config.get("output_field", "record_count")
         description = chart_config.get("description", "")
+        chart_type = str(chart_config.get("type") or "auto").strip().lower()
 
         # Determine the grouping column
-        group_col = None
+        group_cols: list[str] = []
         if group_by and isinstance(group_by, list) and group_by:
-            group_col = group_by[0]
+            group_cols = [
+                resolved
+                for col in group_by
+                if (resolved := VisualizationAgent._resolve_column_name(df, str(col)))
+            ]
         elif x_field and x_field in df.columns:
-            group_col = x_field
+            group_cols = [x_field]
+        if series_field and series_field in df.columns and series_field not in group_cols:
+            group_cols.append(series_field)
 
         # If no explicit group_col, infer from chart description by matching
         # description keywords against actual column names
-        if not group_col and description:
+        if not group_cols and description:
             desc_lower = description.lower().replace("_", " ")
             col_lower_map = {c.lower().replace("_", " "): c for c in df.columns}
             # Try to find a column mentioned in the description
@@ -386,68 +426,129 @@ class VisualizationAgent:
                 if col_key in desc_lower or desc_lower in col_key:
                     # Verify it's a categorical column
                     if pd.api.types.is_string_dtype(df[col_real]) or pd.api.types.is_object_dtype(df[col_real]):
-                        group_col = col_real
+                        group_cols = [col_real]
                         break
             # Also try partial word matching
-            if not group_col:
+            if not group_cols:
                 desc_words = [w for w in desc_lower.split() if len(w) > 3]
                 for col_key, col_real in col_lower_map.items():
                     if any(word in col_key for word in desc_words):
                         if pd.api.types.is_string_dtype(df[col_real]) or pd.api.types.is_object_dtype(df[col_real]):
-                            group_col = col_real
+                            group_cols = [col_real]
                             break
 
         # Resolve column case-insensitively from x_field
-        if not group_col and x_field:
-            col_lower_map = {c.lower().replace(" ", "_"): c for c in df.columns}
-            resolved = col_lower_map.get(x_field.lower().replace(" ", "_"))
+        if not group_cols and x_field:
+            resolved = VisualizationAgent._resolve_column_name(df, x_field)
             if resolved:
-                group_col = resolved
-            else:
-                for real_col in df.columns:
-                    if x_field.lower() in real_col.lower() or real_col.lower() in x_field.lower():
-                        group_col = real_col
-                        break
+                group_cols = [resolved]
 
-        if not group_col or group_col not in df.columns:
+        if not group_cols:
+            # If the plan names a measure but omits a grouping field, prefer
+            # grouping by that requested column over silently defaulting to an
+            # unrelated categorical column such as "gender".
+            if measure and measure in df.columns:
+                group_cols = [measure]
+
+        if not group_cols:
             # Fallback: use first categorical column
             for col in df.columns:
                 if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
                     if df[col].nunique() < len(df) * 0.5:
-                        group_col = col
+                        group_cols = [col]
                         break
-            if not group_col:
-                group_col = df.columns[0]
+            if not group_cols:
+                group_cols = [df.columns[0]]
+
+        if len(group_cols) > 2:
+            raise ValueError("TOO_MANY_VISUALIZATION_DIMENSIONS: grouped bar charts support at most two grouping columns.")
+
+        # Numeric measure requests with no explicit grouping should not collapse
+        # onto an arbitrary categorical field. Treat them as value-frequency
+        # charts instead.
+        if (
+            len(group_cols) == 1
+            and measure
+            and group_cols[0] == measure
+            and measure in df.columns
+            and pd.api.types.is_numeric_dtype(df[measure])
+            and aggregation == "count"
+        ):
+            series = df[measure].dropna()
+            if chart_type == "histogram" and series.nunique() > 20:
+                bins = min(20, max(5, int(series.nunique() ** 0.5)))
+                grouped = (
+                    series.groupby(pd.cut(series, bins=bins, include_lowest=True))
+                    .size()
+                    .reset_index(name=output_field)
+                )
+                grouped.iloc[:, 0] = grouped.iloc[:, 0].astype(str)
+            else:
+                grouped = series.value_counts(dropna=True).sort_index().reset_index()
+                grouped.columns = [measure, output_field]
+            fields = [
+                {
+                    "id": str(measure),
+                    "label": str(measure).replace("_", " ").title(),
+                    "data_type": "float" if pd.api.types.is_float_dtype(df[measure]) else "integer",
+                    "role": "category",
+                    "aggregation": None,
+                },
+                {
+                    "id": str(output_field),
+                    "label": str(output_field).replace("_", " ").title(),
+                    "data_type": "integer",
+                    "role": "measure",
+                    "aggregation": "count",
+                },
+            ]
+            rows = []
+            for _, row in grouped.iterrows():
+                clean_row = {}
+                for col in grouped.columns:
+                    value = row[col]
+                    if hasattr(value, "item"):
+                        clean_row[str(col)] = value.item()
+                    elif pd.isna(value):
+                        clean_row[str(col)] = None
+                    else:
+                        clean_row[str(col)] = value
+                rows.append(clean_row)
+            return {"fields": fields, "rows": rows}
 
         # Perform aggregation
         if aggregation == "sum" and measure and measure in df.columns:
-            grouped = df.groupby(group_col, as_index=False)[measure].sum()
+            grouped = df.groupby(group_cols, as_index=False)[measure].sum()
             grouped.rename(columns={measure: output_field}, inplace=True)
         elif aggregation == "mean" and measure and measure in df.columns:
-            grouped = df.groupby(group_col, as_index=False)[measure].mean()
+            grouped = df.groupby(group_cols, as_index=False)[measure].mean()
             grouped.rename(columns={measure: output_field}, inplace=True)
         else:
             # Default: count
-            grouped = df.groupby(group_col, as_index=False).size()
+            grouped = df.groupby(group_cols, as_index=False).size()
             grouped.rename(columns={"size": output_field}, inplace=True)
 
         # Build operation_result format
-        fields = [
-            {
-                "id": str(group_col),
-                "label": str(group_col).replace("_", " ").title(),
-                "data_type": "string",
-                "role": "category",
-                "aggregation": None,
-            },
+        fields = []
+        for idx, group_col in enumerate(group_cols):
+            fields.append(
+                {
+                    "id": str(group_col),
+                    "label": str(group_col).replace("_", " ").title(),
+                    "data_type": "string",
+                    "role": "category" if idx == 0 else "dimension",
+                    "aggregation": None,
+                }
+            )
+        fields.append(
             {
                 "id": str(output_field),
                 "label": str(output_field).replace("_", " ").title(),
-                "data_type": "number",
+                "data_type": "float" if aggregation in {"sum", "mean"} else "integer",
                 "role": "measure",
                 "aggregation": aggregation,
-            },
-        ]
+            }
+        )
 
         rows = []
         for _, row in grouped.iterrows():

@@ -37,6 +37,7 @@ from finflow_agent.models.canonical import (
     ResolvedProjectAction,
     ResolvedRenameAction,
     ResolvedSortAction,
+    ResolvedVisualizeAction,
 )
 from finflow_agent.models.draft import ResolutionOrigin
 from finflow_agent.models.provenance import PromptSpanProvenance, SchemaEvidenceProvenance
@@ -310,15 +311,42 @@ def _convert_single_action(kind: str, action: dict[str, Any]) -> Any:
             return None
         return ResolvedRenameAction(mappings=mappings, provenance=provenance)
 
-    else:
-        # Unsupported action kinds (clean, calculate, visualize, report, limit_rows)
-        # are not representable in the new schema's resolved action types.
-        # Log a warning and skip.
-        logger.warning(
-            "Legacy action kind '%s' has no equivalent in the new schema; skipped during upcast.",
-            kind,
+    elif kind == "visualize":
+        x = action.get("x")
+        series = action.get("series")
+        group_by = action.get("group_by") or []
+        if not x and isinstance(group_by, list) and group_by:
+            x = group_by[0]
+        if not series and isinstance(group_by, list) and len(group_by) > 1:
+            series = group_by[1]
+
+        chart_type = str(action.get("chart_type") or "auto").strip().lower()
+        if chart_type == "stacked_bar":
+            chart_type = "bar"
+        if chart_type not in {"auto", "bar", "line", "pie", "scatter", "histogram"}:
+            raise UpcasterError(
+                f"ACTION_NOT_SUPPORTED_BY_SCHEMA: visualize chart_type '{chart_type}' cannot be upcasted"
+            )
+
+        return ResolvedVisualizeAction(
+            chart_type=chart_type,
+            x=x,
+            y={
+                "kind": "measure",
+                "function": action.get("aggregation") or "count",
+                "column": action.get("measure"),
+                "output_name": action.get("output_field") or "count",
+            },
+            series=series,
+            options=action.get("options", {}),
+            original_description=action.get("description"),
+            provenance=provenance,
         )
-        return None
+
+    else:
+        raise UpcasterError(
+            f"ACTION_DROPPED_DURING_UPCAST: legacy action kind '{kind}' has no equivalent in the new schema"
+        )
 
 
 def _extract_column_names(fields: list[Any]) -> list[str]:

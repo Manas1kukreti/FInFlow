@@ -33,6 +33,8 @@ from finflow_agent.models.draft import (
     SemanticColumnReference,
     SemanticIntentDraft,
     SortAction,
+    VisualizeAction,
+    VisualizationMeasure,
 )
 from finflow_agent.models.envelope import ResolutionRecord
 from finflow_agent.models.provenance import ProvenanceRef
@@ -149,6 +151,23 @@ class ResolvedRenameAction(BaseModel):
     )
 
 
+class ResolvedVisualizeAction(BaseModel):
+    """A visualization action where all column references are resolved."""
+
+    model_config = ConfigDict(strict=True, frozen=True)
+
+    type: Literal["visualize"] = "visualize"
+    chart_type: Literal["auto", "bar", "line", "pie", "scatter", "histogram"] = "auto"
+    x: str | None = None
+    y: dict[str, object] | None = None
+    series: str | None = None
+    options: dict[str, object] = Field(default_factory=dict)
+    original_description: str | None = None
+    provenance: list[ProvenanceRef] = Field(
+        ..., min_length=1, description="Provenance for the visualization action"
+    )
+
+
 ResolvedAction = Annotated[
     Union[
         ResolvedFilterAction,
@@ -156,6 +175,7 @@ ResolvedAction = Annotated[
         ResolvedDropAction,
         ResolvedSortAction,
         ResolvedRenameAction,
+        ResolvedVisualizeAction,
     ],
     Field(discriminator="type"),
 ]
@@ -242,6 +262,7 @@ class CanonicalIntent(BaseModel):
             | ResolvedDropAction
             | ResolvedSortAction
             | ResolvedRenameAction
+            | ResolvedVisualizeAction
         ] = []
 
         for action in draft.actions:
@@ -288,6 +309,7 @@ def _resolve_action(
     | ResolvedDropAction
     | ResolvedSortAction
     | ResolvedRenameAction
+    | ResolvedVisualizeAction
 ):
     """Convert a draft action to its resolved counterpart.
 
@@ -304,6 +326,8 @@ def _resolve_action(
         return _resolve_sort_action(action)
     elif isinstance(action, RenameAction):
         return _resolve_rename_action(action)
+    elif isinstance(action, VisualizeAction):
+        return _resolve_visualize_action(action)
     else:
         raise CanonicalizeError(f"Unknown action type: {type(action)}")
 
@@ -379,5 +403,37 @@ def _resolve_rename_action(action: RenameAction) -> ResolvedRenameAction:
 
     return ResolvedRenameAction(
         mappings=resolved_mappings,
+        provenance=action.provenance,
+    )
+
+
+def _resolve_visualize_action(action: VisualizeAction) -> ResolvedVisualizeAction:
+    """Resolve a VisualizeAction, validating all active column references."""
+    x = _validate_column_resolved(action.x, "visualize action x-axis") if action.x is not None else None
+    series = _validate_column_resolved(action.series, "visualize action series") if action.series is not None else None
+
+    y_payload: dict[str, object] | None = None
+    if isinstance(action.y, SemanticColumnReference):
+        y_payload = {
+            "kind": "column",
+            "column": _validate_column_resolved(action.y, "visualize action y-axis"),
+        }
+    elif isinstance(action.y, VisualizationMeasure):
+        y_payload = {
+            "kind": "measure",
+            "function": action.y.function,
+            "column": _validate_column_resolved(action.y.column, "visualize action measure")
+            if action.y.column is not None
+            else None,
+            "output_name": action.y.output_name,
+        }
+
+    return ResolvedVisualizeAction(
+        chart_type=action.chart_type,
+        x=x,
+        y=y_payload,
+        series=series,
+        options=action.options.model_dump(mode="json"),
+        original_description=action.original_description,
         provenance=action.provenance,
     )

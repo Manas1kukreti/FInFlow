@@ -56,6 +56,8 @@ from finflow_agent.models.draft import (
     SemanticIntentDraft,
     SortAction,
     UnresolvedPredicate,
+    VisualizeAction,
+    VisualizationMeasure,
 )
 from finflow_agent.models.envelope import IntentEnvelope, PipelineStatus
 from finflow_agent.pipeline.canonicalizer import Canonicalizer
@@ -88,6 +90,7 @@ from finflow_agent.pipeline.semantic_repair import (
     SemanticRepair,
 )
 from finflow_agent.models.draft import ResolutionOrigin
+from finflow_agent.execution.visualization.capabilities import VISUALIZATION_CAPABILITIES
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +211,8 @@ class PipelineResultStatus(str, Enum):
     NEEDS_CLARIFICATION = "needs_clarification"
     FAILED = "failed"
     UNSUPPORTED = "unsupported"
+    UNSUPPORTED_CAPABILITY = "unsupported_capability"
+    CONTRACT_ERROR = "contract_error"
 
 
 class ClarificationNeeded(BaseModel):
@@ -238,6 +243,7 @@ class PipelineResult(BaseModel):
     execution_result: Any = None  # ExecutionResult (lazy imported)
     clarification_needed: ClarificationNeeded | None = None
     error: str | None = None
+    error_code: str | None = None
     submission_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     warnings: list[str] = Field(default_factory=list)
 
@@ -731,6 +737,16 @@ class SemanticPipeline:
         # Set data_snapshot_ref on draft for canonicalization
         draft.data_snapshot_ref = snapshot_ref
 
+        capability_issue = _detect_visualization_capability_issue(draft)
+        if capability_issue is not None:
+            return PipelineResult(
+                status=PipelineResultStatus.UNSUPPORTED_CAPABILITY,
+                error=capability_issue["message"],
+                error_code=capability_issue["code"],
+                submission_id=submission_id,
+                warnings=warnings,
+            )
+
         # Mark draft as resolved after all grounding completes
         try:
             draft = mark_resolved(draft, ResolutionOrigin.AUTOMATIC_GROUNDING)
@@ -742,8 +758,9 @@ class SemanticPipeline:
                 extra=tracing.to_dict(),
             )
             return PipelineResult(
-                status=PipelineResultStatus.FAILED,
+                status=PipelineResultStatus.CONTRACT_ERROR,
                 error=f"Contract violation: {exc}",
+                error_code="INTERNAL_CONTRACT_VIOLATION",
                 submission_id=submission_id,
                 warnings=warnings,
             )
@@ -1098,6 +1115,15 @@ class SemanticPipeline:
 
         # Set data_snapshot_ref and mark resolved
         draft.data_snapshot_ref = snapshot_ref
+        capability_issue = _detect_visualization_capability_issue(draft)
+        if capability_issue is not None:
+            return PipelineResult(
+                status=PipelineResultStatus.UNSUPPORTED_CAPABILITY,
+                error=capability_issue["message"],
+                error_code=capability_issue["code"],
+                submission_id=submission_id,
+                warnings=warnings,
+            )
         try:
             draft = mark_resolved(draft, ResolutionOrigin.AUTOMATIC_GROUNDING)
         except Exception as exc:
@@ -1199,6 +1225,15 @@ def _extract_standalone_references(
             for col_ref, _new_name in action.mappings:
                 if col_ref.resolved_column is None:
                     refs.append(col_ref)
+        elif isinstance(action, VisualizeAction):
+            if action.x is not None and action.x.resolved_column is None:
+                refs.append(action.x)
+            if isinstance(action.y, SemanticColumnReference) and action.y.resolved_column is None:
+                refs.append(action.y)
+            elif isinstance(action.y, VisualizationMeasure) and action.y.column is not None and action.y.column.resolved_column is None:
+                refs.append(action.y.column)
+            if action.series is not None and action.series.resolved_column is None:
+                refs.append(action.series)
     return refs
 
 
@@ -1218,3 +1253,49 @@ def _extract_predicate_references(
                     if predicate.field_ref.resolved_column is None:
                         predicates.append(predicate)
     return predicates
+
+
+def _detect_visualization_capability_issue(
+    draft: SemanticIntentDraft,
+) -> dict[str, str] | None:
+    """Return a structured capability error when a grounded visualize action is unsupported."""
+    for action in draft.actions:
+        if not isinstance(action, VisualizeAction):
+            continue
+        capability = VISUALIZATION_CAPABILITIES.get(action.chart_type)
+        if capability is None:
+            return {
+                "code": "INVALID_CHART_COMBINATION",
+                "message": f"Chart type '{action.chart_type}' is not supported.",
+            }
+        if action.series is not None and not capability.supports_series:
+            return {
+                "code": "INVALID_CHART_COMBINATION",
+                "message": (
+                    f"{action.chart_type} charts do not support a secondary series field."
+                ),
+            }
+        grouping_dimensions = 0
+        if action.x is not None:
+            grouping_dimensions += 1
+        if action.series is not None:
+            grouping_dimensions += 1
+        if grouping_dimensions > capability.max_grouping_dimensions:
+            return {
+                "code": "TOO_MANY_VISUALIZATION_DIMENSIONS",
+                "message": (
+                    f"{action.chart_type} charts currently support at most "
+                    f"{capability.max_grouping_dimensions} grouping dimensions."
+                ),
+            }
+        bar_mode = action.options.bar_mode
+        if action.chart_type == "bar" and action.series is not None:
+            normalized_mode = bar_mode or "grouped"
+            if normalized_mode not in capability.supported_bar_modes:
+                return {
+                    "code": "GROUPED_BAR_NOT_SUPPORTED" if normalized_mode == "grouped" else "STACKED_BAR_NOT_SUPPORTED",
+                    "message": (
+                        f"The requested bar mode '{normalized_mode}' is not currently supported."
+                    ),
+                }
+    return None

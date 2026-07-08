@@ -1,0 +1,20 @@
+{
+  "agent:enq_test_123": {
+    "job_id": "agent:enq_test_123",
+    "submission_id": "enq_test_123",
+    "status": "QUEUED",
+    "payload": {
+      "submission_id": "enq_test_123",
+      "file_id": "safe.csv",
+      "file_name": "safe.csv",
+      "resolved_file_path": null,
+      "data_profile_id": null,
+      "canonical_intent_revision_id": null,
+      "canonical_intent": null,
+      "output_format": "csv",
+      "audit_context": null
+    },
+    "result": null,
+    "error": null
+  }
+}

@@ -142,6 +142,22 @@ class TestEnrichIntentWithVisualization:
         assert viz_action["chart_type"] is None
 
 
+    def test_multi_chart_prompt_with_clustered_bar_and_pi_chart(self):
+        intent = {
+            "original_prompt": "generate the clustered bar graph for house ownership and the pi chart for male and female",
+            "actions": [],
+        }
+        result = enrich_intent_with_visualization(intent)
+        viz_actions = [a for a in result["actions"] if a["kind"] == "visualize"]
+
+        assert len(viz_actions) == 2
+        assert viz_actions[0]["chart_type"] == "bar"
+        assert viz_actions[0]["bar_mode"] == "grouped"
+        assert viz_actions[0]["description"] == "house ownership"
+        assert viz_actions[1]["chart_type"] == "pie"
+        assert viz_actions[1]["description"] == "male and female"
+
+
 # ---------------------------------------------------------------------------
 # Tests for should_produce_visualization
 # ---------------------------------------------------------------------------

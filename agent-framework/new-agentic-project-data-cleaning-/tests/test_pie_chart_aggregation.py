@@ -28,6 +28,8 @@ from finflow_agent.planning.compiler import (
     compile_canonical_intent,
     compile_intent_to_plan,
     CANONICAL_OUTPUT_KEYS,
+    _build_visualization_calc_operation,
+    _normalize_chart_for_compilation,
 )
 from finflow_agent.planning.intent_schema import PlanIntent
 from finflow_agent.execution.visualization.validators import (
@@ -69,6 +71,13 @@ def _make_plan_intent_with_pie(group_by=None, aggregation=None, measure=None, ou
     return PlanIntent(
         needs_visualization=True,
         visualization_plan=VisualizationOperationPlan(charts=[chart]),
+    )
+
+
+def _make_plan_intent_with_charts(*charts: ChartSpec) -> PlanIntent:
+    return PlanIntent(
+        needs_visualization=True,
+        visualization_plan=VisualizationOperationPlan(charts=list(charts)),
     )
 
 
@@ -166,6 +175,8 @@ class TestCompilerInsertsCalculationStep:
         assert calc_idx < viz_idx, "calculation_agent must precede visualization_agent"
 
     def test_calc_step_uses_group_count_operation(self):
+        from finflow_agent.operations.schemas import CalculationOperationPlan
+
         intent = _make_plan_intent_with_pie(
             group_by=["gender"], aggregation="count", output_field="gender_count"
         )
@@ -180,8 +191,11 @@ class TestCompilerInsertsCalculationStep:
         ops = calc_step.params["operations"]
         assert len(ops) == 1
         assert ops[0]["type"] == "group_count"
+        assert ops[0]["column"] is None
         assert ops[0]["group_by"] == ["gender"]
         assert ops[0]["output_column"] == "gender_count"
+        parsed = CalculationOperationPlan(operations=ops)
+        assert parsed.operations[0].column is None
 
     def test_calc_step_uses_group_sum_for_sum_aggregation(self):
         intent = _make_plan_intent_with_pie(
@@ -628,3 +642,300 @@ class TestCanonicalOutputKeys:
 
     def test_df_calc_viz_is_canonical(self):
         assert "df_calc_viz" in CANONICAL_OUTPUT_KEYS
+
+
+class TestMultiChartVisualizationRouting:
+    def test_aggregated_pie_followed_by_raw_bar_keeps_shared_bar_input(self):
+        intent = _make_plan_intent_with_charts(
+            ChartSpec(
+                type="pie",
+                x="home_ownership",
+                y="count",
+                title="Home Ownership Pie Chart",
+                group_by=["home_ownership"],
+                aggregation="count",
+                output_field="count",
+            ),
+            ChartSpec(
+                type="bar",
+                x="education_level",
+                y="auto",
+                title="Education Bar Chart",
+            ),
+        )
+        plan = compile_intent_to_plan(
+            intent,
+            resolved_file_path="test.csv",
+            file_type="csv",
+            output_dir="outputs",
+            file_prefix="test",
+        )
+
+        calc_step = next(s for s in plan.steps if s.step_id == "calc_viz_1")
+        pie_viz = next(s for s in plan.steps if s.step_id == "visualize_1")
+        bar_viz = next(s for s in plan.steps if s.step_id == "visualize_2")
+        report = next(s for s in plan.steps if s.step_id == "report")
+
+        assert calc_step.input_from == ["df_ingested"]
+        assert calc_step.output_key == "df_calc_viz_1"
+        assert pie_viz.depends_on == ["calc_viz_1"]
+        assert pie_viz.input_from == ["df_calc_viz_1"]
+        assert bar_viz.depends_on == ["ingest"]
+        assert bar_viz.input_from == ["df_ingested"]
+        assert bar_viz.input_from != pie_viz.input_from
+        assert report.depends_on == ["visualize_1", "visualize_2"]
+        assert report.input_from == ["df_ingested", "df_visualized_1", "df_visualized_2"]
+
+    def test_two_aggregated_charts_get_independent_calc_branches(self):
+        intent = _make_plan_intent_with_charts(
+            ChartSpec(
+                type="pie",
+                x="home_ownership",
+                y="count",
+                title="Home Ownership Pie Chart",
+                group_by=["home_ownership"],
+                aggregation="count",
+                output_field="count",
+            ),
+            ChartSpec(
+                type="bar",
+                x="education_level",
+                y="count",
+                title="Education Bar Chart",
+                group_by=["education_level"],
+                aggregation="count",
+                output_field="count",
+            ),
+        )
+        plan = compile_intent_to_plan(
+            intent,
+            resolved_file_path="test.csv",
+            file_type="csv",
+            output_dir="outputs",
+            file_prefix="test",
+        )
+
+        calc_1 = next(s for s in plan.steps if s.step_id == "calc_viz_1")
+        calc_2 = next(s for s in plan.steps if s.step_id == "calc_viz_2")
+        viz_1 = next(s for s in plan.steps if s.step_id == "visualize_1")
+        viz_2 = next(s for s in plan.steps if s.step_id == "visualize_2")
+
+        assert calc_1.input_from == ["df_ingested"]
+        assert calc_2.input_from == ["df_ingested"]
+        assert calc_1.output_key == "df_calc_viz_1"
+        assert calc_2.output_key == "df_calc_viz_2"
+        assert calc_1.output_key != calc_2.output_key
+        assert viz_1.depends_on == ["calc_viz_1"]
+        assert viz_2.depends_on == ["calc_viz_2"]
+        assert viz_1.input_from == ["df_calc_viz_1"]
+        assert viz_2.input_from == ["df_calc_viz_2"]
+
+    def test_raw_bar_followed_by_aggregated_pie_is_order_independent(self):
+        intent = _make_plan_intent_with_charts(
+            ChartSpec(
+                type="bar",
+                x="education_level",
+                y="auto",
+                title="Education Bar Chart",
+            ),
+            ChartSpec(
+                type="pie",
+                x="home_ownership",
+                y="count",
+                title="Home Ownership Pie Chart",
+                group_by=["home_ownership"],
+                aggregation="count",
+                output_field="count",
+            ),
+        )
+        plan = compile_intent_to_plan(
+            intent,
+            resolved_file_path="test.csv",
+            file_type="csv",
+            output_dir="outputs",
+            file_prefix="test",
+        )
+
+        raw_viz = next(s for s in plan.steps if s.step_id == "visualize_1")
+        calc_viz = next(s for s in plan.steps if s.step_id == "calc_viz_2")
+        pie_viz = next(s for s in plan.steps if s.step_id == "visualize_2")
+
+        assert raw_viz.depends_on == ["ingest"]
+        assert raw_viz.input_from == ["df_ingested"]
+        assert calc_viz.input_from == ["df_ingested"]
+        assert pie_viz.depends_on == ["calc_viz_2"]
+        assert pie_viz.input_from == ["df_calc_viz_2"]
+
+    def test_two_raw_charts_share_source_without_calc_steps(self):
+        intent = _make_plan_intent_with_charts(
+            ChartSpec(type="bar", x="education_level", y="auto", title="Education Bar Chart"),
+            ChartSpec(type="bar", x="home_ownership", y="auto", title="Home Ownership Bar Chart"),
+        )
+        plan = compile_intent_to_plan(
+            intent,
+            resolved_file_path="test.csv",
+            file_type="csv",
+            output_dir="outputs",
+            file_prefix="test",
+        )
+
+        calc_steps = [s for s in plan.steps if s.agent == "calculation_agent"]
+        viz_1 = next(s for s in plan.steps if s.step_id == "visualize_1")
+        viz_2 = next(s for s in plan.steps if s.step_id == "visualize_2")
+
+        assert calc_steps == []
+        assert viz_1.input_from == ["df_ingested"]
+        assert viz_2.input_from == ["df_ingested"]
+        assert viz_1.depends_on == ["ingest"]
+        assert viz_2.depends_on == ["ingest"]
+
+    def test_single_aggregated_chart_preserves_existing_wiring(self):
+        intent = _make_plan_intent_with_pie(
+            group_by=["gender"], aggregation="count", output_field="record_count"
+        )
+        plan = compile_intent_to_plan(
+            intent,
+            resolved_file_path="test.csv",
+            file_type="csv",
+            output_dir="outputs",
+            file_prefix="test",
+        )
+
+        calc_step = next(s for s in plan.steps if s.step_id == "calc_viz")
+        viz_step = next(s for s in plan.steps if s.step_id == "visualize")
+        report = next(s for s in plan.steps if s.step_id == "report")
+
+        assert calc_step.input_from == ["df_ingested"]
+        assert calc_step.output_key == "df_calc_viz"
+        assert viz_step.depends_on == ["calc_viz"]
+        assert viz_step.input_from == ["df_calc_viz"]
+        assert report.depends_on == ["visualize"]
+        assert report.input_from == ["df_visualized"]
+
+
+class TestGroupedCountNormalization:
+    def test_grouped_count_removes_duplicate_measure_and_series(self):
+        chart = ChartSpec(
+            type="pie",
+            x="home_ownership",
+            y="count",
+            title="Home Ownership Pie Chart",
+            group_by=["home_ownership"],
+            measure="home_ownership",
+            series="home_ownership",
+            aggregation="count",
+            output_field="count",
+        )
+
+        normalized = _normalize_chart_for_compilation(chart)
+
+        assert normalized.group_by == ["home_ownership"]
+        assert normalized.measure is None
+        assert normalized.series is None
+
+    def test_grouped_count_builds_operation_without_measure_column(self):
+        chart = ChartSpec(
+            type="pie",
+            x="home_ownership",
+            y="count",
+            title="Home Ownership Pie Chart",
+            group_by=["home_ownership"],
+            measure="home_ownership",
+            aggregation="count",
+            output_field="count",
+        )
+
+        operation = _build_visualization_calc_operation(
+            _normalize_chart_for_compilation(chart)
+        )
+
+        assert operation["type"] == "group_count"
+        assert operation["group_by"] == ["home_ownership"]
+        assert operation["column"] is None
+        assert operation["output_column"] == "count"
+
+    def test_canonical_count_chart_adapter_drops_redundant_measure(self):
+        intent = CanonicalIntent(
+            schema_version="2.0",
+            resolution_status="resolved",
+            output_format="xlsx",
+            dataframe_profile={"source_columns": ["education_level", "home_ownership"]},
+            actions=[
+                VisualizeIntent(
+                    kind="visualize",
+                    chart_type="pie",
+                    x="home_ownership",
+                    group_by=["home_ownership"],
+                    measure="home_ownership",
+                    series="home_ownership",
+                    aggregation="count",
+                    output_field="count",
+                    title="Home Ownership Pie Chart",
+                )
+            ],
+        )
+
+        plan = compile_canonical_intent(
+            intent,
+            resolved_file_path="test.csv",
+            file_type="csv",
+            output_dir="outputs",
+            artifact_prefix="test",
+        )
+
+        calc_step = next(s for s in plan.steps if s.agent == "calculation_agent")
+        viz_step = next(s for s in plan.steps if s.agent == "visualization_agent")
+        chart = viz_step.params["plan"]["charts"][0]
+        operation = calc_step.params["operations"][0]
+
+        assert chart["measure"] is None
+        assert chart["series"] is None
+        assert operation["type"] == "group_count"
+        assert operation["column"] is None
+        assert operation["group_by"] == ["home_ownership"]
+
+    def test_multi_chart_count_normalization_does_not_leak_measure_state(self):
+        intent = _make_plan_intent_with_charts(
+            ChartSpec(
+                type="bar",
+                x="education_level",
+                y="annual_income",
+                title="Education Income Bar Chart",
+                group_by=["education_level"],
+                measure="annual_income",
+                aggregation="mean",
+                output_field="avg_income",
+            ),
+            ChartSpec(
+                type="pie",
+                x="home_ownership",
+                y="count",
+                title="Home Ownership Pie Chart",
+                group_by=["home_ownership"],
+                measure="home_ownership",
+                series="home_ownership",
+                aggregation="count",
+                output_field="count",
+            ),
+        )
+
+        plan = compile_intent_to_plan(
+            intent,
+            resolved_file_path="test.csv",
+            file_type="csv",
+            output_dir="outputs",
+            file_prefix="test",
+        )
+
+        calc_1 = next(s for s in plan.steps if s.step_id == "calc_viz_1")
+        calc_2 = next(s for s in plan.steps if s.step_id == "calc_viz_2")
+        pie_viz = next(s for s in plan.steps if s.step_id == "visualize_2")
+        pie_chart = pie_viz.params["plan"]["charts"][0]
+
+        assert calc_1.params["operations"][0]["type"] == "group_mean"
+        assert calc_1.params["operations"][0]["column"] == "annual_income"
+        assert calc_2.params["operations"][0]["type"] == "group_count"
+        assert calc_2.params["operations"][0]["column"] is None
+        assert calc_2.params["operations"][0]["group_by"] == ["home_ownership"]
+        assert pie_chart["measure"] is None
+        assert pie_chart["series"] is None

@@ -40,6 +40,9 @@ from finflow_agent.models.draft import (
     SemanticIntentDraft,
     SortAction,
     UnresolvedPredicate,
+    VisualizeAction,
+    VisualizationMeasure,
+    VisualizationOptions,
 )
 from finflow_agent.models.provenance import (
     PromptSpanProvenance,
@@ -148,7 +151,7 @@ OUTPUT JSON SCHEMA:
 {
   "actions": [
     {
-      "type": "filter|project|drop|sort|rename",
+      "type": "filter|project|drop|sort|rename|visualize",
       ... action-specific fields ...
       "provenance": [{"type":"prompt_span","start_offset":N,"end_offset":M,"source_text":"..."}]
     }
@@ -181,6 +184,27 @@ For filter actions:
     }],
     "provenance": [{"type":"prompt_span","start_offset":N,"end_offset":M,"source_text":"..."}]
   }],
+  "provenance": [{"type":"prompt_span","start_offset":N,"end_offset":M,"source_text":"..."}]
+}
+
+For visualize actions:
+{
+  "type": "visualize",
+  "chart_type": "auto|bar|line|pie|scatter|histogram",
+  "x": { "reference_text": "...", "reference_kind": "...", "provenance": [...] },
+  "y": {
+    "function": "count|sum|mean|median|min|max",
+    "column": { "reference_text": "...", "reference_kind": "...", "provenance": [...] } | null,
+    "output_name": "count"
+  },
+  "series": { "reference_text": "...", "reference_kind": "...", "provenance": [...] } | null,
+  "options": {
+    "bar_mode": "grouped|stacked",
+    "show_legend": true,
+    "show_data_labels": false,
+    "title": "..."
+  },
+  "original_description": "...",
   "provenance": [{"type":"prompt_span","start_offset":N,"end_offset":M,"source_text":"..."}]
 }
 
@@ -430,6 +454,8 @@ class SemanticExtractor:
             return self._parse_sort_action(prompt, raw, provenance)
         elif action_type == "rename":
             return self._parse_rename_action(prompt, raw, provenance)
+        elif action_type == "visualize":
+            return self._parse_visualize_action(prompt, raw, provenance)
         else:
             logger.warning("Unknown action type: %r", action_type)
             return None
@@ -637,6 +663,51 @@ class SemanticExtractor:
                 )
             ]
         return RenameAction(mappings=mappings, provenance=provenance)
+
+    def _parse_visualize_action(
+        self,
+        prompt: str,
+        raw: dict[str, Any],
+        provenance: list[ProvenanceRef],
+    ) -> VisualizeAction:
+        """Parse a visualize action with typed x/y/series semantics."""
+        x_ref = raw.get("x")
+        x = self._parse_column_reference(prompt, x_ref) if isinstance(x_ref, dict) else None
+
+        y_raw = raw.get("y")
+        y: VisualizationMeasure | SemanticColumnReference | None = None
+        if isinstance(y_raw, dict) and "function" in y_raw:
+            column_raw = y_raw.get("column")
+            y = VisualizationMeasure(
+                function=y_raw.get("function", "count"),
+                column=self._parse_column_reference(prompt, column_raw) if isinstance(column_raw, dict) else None,
+                output_name=y_raw.get("output_name"),
+            )
+        elif isinstance(y_raw, dict):
+            y = self._parse_column_reference(prompt, y_raw)
+
+        series_raw = raw.get("series")
+        series = self._parse_column_reference(prompt, series_raw) if isinstance(series_raw, dict) else None
+
+        options_raw = raw.get("options", {})
+        options = VisualizationOptions(
+            bar_mode=options_raw.get("bar_mode"),
+            show_legend=options_raw.get("show_legend"),
+            show_data_labels=options_raw.get("show_data_labels"),
+            title=options_raw.get("title"),
+            x_axis_title=options_raw.get("x_axis_title"),
+            y_axis_title=options_raw.get("y_axis_title"),
+        ) if isinstance(options_raw, dict) else VisualizationOptions()
+
+        return VisualizeAction(
+            chart_type=raw.get("chart_type", "auto") or "auto",
+            x=x,
+            y=y,
+            series=series,
+            options=options,
+            original_description=raw.get("original_description"),
+            provenance=provenance,
+        )
 
     def _parse_column_references(
         self, prompt: str, raw_refs: list[Any]

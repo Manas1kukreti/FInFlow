@@ -7,9 +7,9 @@ import pandas as pd
 
 from app.services.canonical_intent import build_canonical_intent
 from app.services.data_profile import build_data_profile_from_file
-from app.services.new_pipeline_bridge import run_new_semantic_pipeline_sync
+from app.services.new_pipeline_bridge import _ground_draft_references, run_new_semantic_pipeline_sync
 from app.services.rule_engine import build_validation_warnings
-from app.services.new_pipeline_bridge import _convert_filter
+from app.services.new_pipeline_bridge import _convert_filter, _convert_action
 
 
 def test_forbidden_substring_flags_normalized_variants():
@@ -718,6 +718,196 @@ def test_new_pipeline_bridge_preserves_in_membership():
     assert len(converted["conditions"]) == 1
     assert converted["conditions"][0]["operator"] == "in"
     assert converted["conditions"][0]["value"] == ["paypal", "cash"]
+
+
+def test_new_pipeline_bridge_preserves_grouped_bar_semantics():
+    from finflow_agent.models.draft import (
+        ReferenceKind,
+        SemanticColumnReference,
+        VisualizeAction,
+        VisualizationMeasure,
+        VisualizationOptions,
+    )
+    from finflow_agent.models.provenance import PromptSpanProvenance
+
+    provenance = [PromptSpanProvenance(start_offset=0, end_offset=6, source_text="prompt")]
+    x_ref = SemanticColumnReference(
+        reference_text="education",
+        reference_kind=ReferenceKind.SEMANTIC_CONCEPT,
+        resolved_column="education_level",
+        confidence=1.0,
+        provenance=provenance,
+    )
+    series_ref = SemanticColumnReference(
+        reference_text="gender",
+        reference_kind=ReferenceKind.SEMANTIC_CONCEPT,
+        resolved_column="gender",
+        confidence=1.0,
+        provenance=provenance,
+    )
+    action = VisualizeAction(
+        chart_type="bar",
+        x=x_ref,
+        y=VisualizationMeasure(function="count", output_name="count"),
+        series=series_ref,
+        options=VisualizationOptions(
+            bar_mode="grouped",
+            show_legend=True,
+            show_data_labels=True,
+            title="Education by Gender",
+            x_axis_title="Education",
+            y_axis_title="Count",
+        ),
+        original_description="grouped bar by education and gender",
+        provenance=provenance,
+    )
+
+    converted = _convert_action(action, ["education_level", "gender"])
+
+    assert converted["kind"] == "visualize"
+    assert converted["chart_type"] == "bar"
+    assert converted["x"]["resolved_column"] == "education_level"
+    assert converted["series"]["resolved_column"] == "gender"
+    assert [item["resolved_column"] for item in converted["group_by"]] == ["education_level", "gender"]
+    assert converted["aggregation"] == "count"
+    assert converted["output_field"] == "count"
+    assert converted["bar_mode"] == "grouped"
+    assert converted["show_legend"] is True
+    assert converted["show_data_labels"] is True
+
+
+def test_ground_draft_references_handles_visualization_count_measure():
+    from finflow_agent.models.draft import (
+        ReferenceKind,
+        SemanticColumnReference,
+        VisualizeAction,
+        VisualizationMeasure,
+        VisualizationOptions,
+    )
+    from finflow_agent.models.provenance import PromptSpanProvenance
+
+    provenance = [PromptSpanProvenance(start_offset=0, end_offset=6, source_text="prompt")]
+    x_ref = SemanticColumnReference(
+        reference_text="house ownership",
+        reference_kind=ReferenceKind.SEMANTIC_CONCEPT,
+        resolved_column=None,
+        confidence=None,
+        provenance=provenance,
+    )
+    series_ref = SemanticColumnReference(
+        reference_text="gender",
+        reference_kind=ReferenceKind.SEMANTIC_CONCEPT,
+        resolved_column=None,
+        confidence=None,
+        provenance=provenance,
+    )
+    action = VisualizeAction(
+        chart_type="bar",
+        x=x_ref,
+        y=VisualizationMeasure(function="count", output_name="count"),
+        series=series_ref,
+        options=VisualizationOptions(bar_mode="grouped"),
+        original_description="grouped bar by house ownership and gender",
+        provenance=provenance,
+    )
+    draft = SimpleNamespace(actions=[action])
+
+    _ground_draft_references(draft, ["House Ownership", "Gender"])
+
+    assert action.x is not None and action.x.resolved_column == "House Ownership"
+    assert action.series is not None and action.series.resolved_column == "Gender"
+    assert action.y is not None
+
+
+def test_canonical_intent_preserves_grouped_bar_visualize_action_from_bridge(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_BRIDGE_API_KEY", "test-bridge-key")
+
+    bridge_result = {
+        "schema_version": "2.0",
+        "intent_id": "intent-viz-1",
+        "intent_revision": 1,
+        "intent_hash": "hash-viz-1",
+        "parent_intent_id": None,
+        "original_prompt": "Create a grouped bar chart showing count of people by education and gender.",
+        "normalized_prompt": "create a grouped bar chart showing count of people by education and gender.",
+        "resolution_status": "resolved",
+        "decision": "visualize",
+        "evidence": ["new_pipeline_extraction: 1.0"],
+        "alternatives_considered": [],
+        "actions": [
+            {
+                "kind": "visualize",
+                "chart_type": "bar",
+                "x": {
+                    "raw_reference": "education",
+                    "resolved_column": "education_level",
+                    "resolution_method": "semantic_concept",
+                    "resolved_columns": ["education_level"],
+                    "candidate_columns": [],
+                    "evidence": [],
+                },
+                "series": {
+                    "raw_reference": "gender",
+                    "resolved_column": "gender",
+                    "resolution_method": "semantic_concept",
+                    "resolved_columns": ["gender"],
+                    "candidate_columns": [],
+                    "evidence": [],
+                },
+                "group_by": [
+                    {
+                        "raw_reference": "education",
+                        "resolved_column": "education_level",
+                        "resolution_method": "semantic_concept",
+                        "resolved_columns": ["education_level"],
+                        "candidate_columns": [],
+                        "evidence": [],
+                    },
+                    {
+                        "raw_reference": "gender",
+                        "resolved_column": "gender",
+                        "resolution_method": "semantic_concept",
+                        "resolved_columns": ["gender"],
+                        "candidate_columns": [],
+                        "evidence": [],
+                    },
+                ],
+                "aggregation": "count",
+                "output_field": "count",
+                "bar_mode": "grouped",
+                "show_legend": True,
+                "show_data_labels": True,
+            }
+        ],
+        "output_format": "xlsx",
+        "assumptions": [],
+        "repair_notes": [],
+        "dataframe_profile": {"columns": ["education_level", "gender"]},
+        "capability_version": "backend.capability.1",
+        "capability_snapshot": {},
+    }
+
+    def _fake_bridge(*args, **kwargs):
+        return bridge_result
+
+    monkeypatch.setattr("app.services.new_pipeline_bridge.run_new_semantic_pipeline_sync", _fake_bridge)
+
+    result = build_canonical_intent(
+        ["education_level", "gender"],
+        [{"education_level": "PhD", "gender": "Female"}],
+        "Create a grouped bar chart showing count of people by education and gender.",
+        detected_types={"education_level": "string", "gender": "string"},
+    )
+
+    visualize = next(action for action in result["actions"] if action["kind"] == "visualize")
+    assert visualize["chart_type"] == "bar"
+    assert visualize["x"]["resolved_column"] == "education_level"
+    assert visualize["series"]["resolved_column"] == "gender"
+    assert [item["resolved_column"] for item in visualize["group_by"]] == ["education_level", "gender"]
+    assert visualize["bar_mode"] == "grouped"
+    assert visualize["show_legend"] is True
+    assert visualize["show_data_labels"] is True
 
 
 def test_new_pipeline_bridge_returns_none_on_rate_limit(monkeypatch):
