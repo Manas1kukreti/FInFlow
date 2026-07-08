@@ -4,27 +4,6 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field
 
 from app.schemas.visualization import VisualizationSpecRead  # noqa: E402
-from app.schemas.chat import (  # noqa: E402
-    ChatCancelExecutionResponse,
-    ChatChartAxisRead,
-    ChatChartRead,
-    ChatChartSeriesRead,
-    ChatClarificationOptionRead,
-    ChatClarificationRead,
-    ChatConversationCreateRequest,
-    ChatConversationDetailRead,
-    ChatConversationSummaryRead,
-    ChatDatasetColumnRead,
-    ChatDatasetRead,
-    ChatExecutionRead,
-    ChatExecutionStatusRead,
-    ChatExportRequest,
-    ChatMessageRead,
-    ChatResultColumnRead,
-    ChatResultRead,
-    ChatSendMessageRequest,
-    ChatSendMessageResponse,
-)
 
 
 class UserCreate(BaseModel):

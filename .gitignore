@@ -23,6 +23,7 @@ logs/
 
 .vscode/
 .idea/
+.kiro/
 
 Thumbs.db
 

@@ -19,7 +19,6 @@ class Settings(BaseSettings):
     agent_dispatch_queue: str = "finflow:agent:dispatch"
     agent_dispatch_retry_queue: str = "finflow:agent:dispatch:retry"
     agent_dead_letter_queue: str = "finflow:agent:dispatch:dead"
-    chat_dispatch_queue: str = "finflow:chat:dispatch"
     dispatch_max_attempts: int = 3
     dispatch_retry_base_delay_seconds: int = 15
     dispatch_retry_max_delay_seconds: int = 300

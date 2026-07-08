@@ -413,18 +413,3 @@ from app.models.visualization import (  # noqa: E402, F401
     get_visualizations_by_job_id,
     upsert_visualization,
 )
-
-# Import chat models so they are registered with Base.metadata
-from app.models.chat import (  # noqa: E402, F401
-    ChatConversation,
-    ChatConversationStatus,
-    ChatDataset,
-    ChatDatasetRow,
-    ChatExecution,
-    ChatExecutionPhase,
-    ChatExecutionStatus,
-    ChatIntentRevision,
-    ChatMessage,
-    ChatMessageRole,
-    ChatMessageType,
-)

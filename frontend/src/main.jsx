@@ -13,7 +13,6 @@ import AdminDashboard from "./pages/AdminDashboard.jsx";
 import AuditPage from "./pages/AuditPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import AlertsPage from "./pages/AlertsPage.jsx";
-import EmployeeChatPage from "./pages/EmployeeChatPage.jsx";
 import AuthPage from "./pages/AuthPage.jsx";
 import LandingPage from "./pages/LandingPage.jsx";
 import VerifyPasswordPage from "./pages/VerifyPasswordPage.jsx";
@@ -51,7 +50,6 @@ createRoot(document.getElementById("root")).render(
                   <Route path="/jobs" element={<SubmissionsPage />} />
                   <Route path="/jobs/new" element={<UploadCenter />} />
                   <Route path="/jobs/:jobId" element={<AuditPage />} />
-                  <Route path="/employee-chat" element={<EmployeeChatPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route
                     path="/uploads"

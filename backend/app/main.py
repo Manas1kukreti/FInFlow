@@ -3,12 +3,10 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from arq import create_pool
-from arq.connections import RedisSettings
 from sqlalchemy import select
 from redis.asyncio import Redis
 
-from app.api import admin, agent, alerts, analytics, approvals, audit, auth, chat, clarification, comments, uploads, websockets
+from app.api import admin, agent, alerts, analytics, approvals, audit, auth, clarification, comments, uploads, websockets
 from app.core.config import get_settings
 from app.core.security import hash_password
 from app.db.session import AsyncSessionLocal, get_db
@@ -78,14 +76,11 @@ app.include_router(admin.router, prefix="/api")
 app.include_router(comments.router, prefix="/api")
 app.include_router(audit.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
-app.include_router(chat.router, prefix="/api")
 app.include_router(websockets.router)
 
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    chat_redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
-    app.state.chat_dispatch_redis = chat_redis
     if settings.environment.lower() == "development" or settings.seed_default_users:
         async with AsyncSessionLocal() as db:
             await seed_user(
@@ -113,9 +108,6 @@ async def on_startup() -> None:
 async def on_shutdown() -> None:
     await stop_dispatcher(app)
     await stop_cleanup_loop(app)
-    chat_redis = getattr(app.state, "chat_dispatch_redis", None)
-    if chat_redis is not None:
-        await chat_redis.close()
 
 
 async def seed_user(db, *, name: str, email: str, password: str, role: UserRole) -> None:
@@ -197,7 +189,6 @@ async def health(db: AsyncSession = Depends(get_db)) -> dict[str, str | int | bo
         payload["dispatch_queue_depth"] = int(await redis.llen(settings.agent_dispatch_queue))
         payload["dispatch_retry_depth"] = int(await redis.zcard(settings.agent_dispatch_retry_queue))
         payload["dispatch_dead_letter_depth"] = int(await redis.llen(settings.agent_dead_letter_queue))
-        payload["chat_dispatch_queue_depth"] = int(await redis.llen(settings.chat_dispatch_queue))
         payload["dispatcher_running"] = bool(getattr(app.state, "agent_dispatch_task", None))
     except Exception:
         payload["redis"] = "unreachable"
