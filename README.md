@@ -328,7 +328,6 @@ python -m uvicorn app.main:app --reload
 ## Notes
 
 - The old employee chatbot feature has been removed from the active app.
-- `.kiro/` is ignored so local Kiro spec files do not get committed.
 - Historical Alembic migrations are preserved as schema history.
 - The dynamic execution plan is deterministic for a given resolved intent.
 
