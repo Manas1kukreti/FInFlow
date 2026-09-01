@@ -33,7 +33,6 @@ _DOCKER_SRC = "/app/finflow_agent_src"
 _LOCAL_SRC = str(
     Path(__file__).resolve().parents[3]
     / "agent-framework"
-    / "new-agentic-project-data-cleaning-"
     / "src"
 )
 

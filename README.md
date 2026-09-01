@@ -179,9 +179,9 @@ It treats the user instruction as a structured request and tries to infer:
 
 Relevant code paths:
 
-- [backend/app/services/canonical_intent.py](C:/Users/acer/Documents/agentic_Ai-main/backend/app/services/canonical_intent.py)
-- [backend/app/services/semantic_pipeline.py](C:/Users/acer/Documents/agentic_Ai-main/backend/app/services/semantic_pipeline.py)
-- [backend/app/services/semantic_grounding.py](C:/Users/acer/Documents/agentic_Ai-main/backend/app/services/semantic_grounding.py)
+- [backend/app/services/canonical_intent.py](backend/app/services/canonical_intent.py)
+- [backend/app/services/semantic_pipeline.py](backend/app/services/semantic_pipeline.py)
+- [backend/app/services/semantic_grounding.py](backend/app/services/semantic_grounding.py)
 
 ## Grounding
 
@@ -219,9 +219,9 @@ Instead it:
 
 Relevant code paths:
 
-- [backend/app/services/clarification_service.py](C:/Users/acer/Documents/agentic_Ai-main/backend/app/services/clarification_service.py)
-- [backend/app/services/clarification_questions.py](C:/Users/acer/Documents/agentic_Ai-main/backend/app/services/clarification_questions.py)
-- [backend/app/models/clarification.py](C:/Users/acer/Documents/agentic_Ai-main/backend/app/models/clarification.py)
+- [backend/app/services/clarification_service.py](backend/app/services/clarification_service.py)
+- [backend/app/services/clarification_questions.py](backend/app/services/clarification_questions.py)
+- [backend/app/models/clarification.py](backend/app/models/clarification.py)
 
 This is the right place to think about prompts like:
 
@@ -246,8 +246,8 @@ The compiler decides the plan shape based on the request:
 
 Relevant code paths:
 
-- [backend/app/services/agent_dispatcher.py](C:/Users/acer/Documents/agentic_Ai-main/backend/app/services/agent_dispatcher.py)
-- [agent-framework/new-agentic-project-data-cleaning-/src/finflow_agent/planning/compiler.py](C:/Users/acer/Documents/agentic_Ai-main/agent-framework/new-agentic-project-data-cleaning-/src/finflow_agent/planning/compiler.py)
+- [backend/app/services/agent_dispatcher.py](backend/app/services/agent_dispatcher.py)
+- [agent-framework/src/finflow_agent/planning/compiler.py](agent-framework/src/finflow_agent/planning/compiler.py)
 
 In practice, the compiler creates `PlanStep` nodes with explicit `depends_on` and `input_from` links. That makes the DAG deterministic for a given intent, but still dynamic across different requests.
 
@@ -301,12 +301,12 @@ The interaction pattern is:
 
 ## Important Files
 
-- [frontend/src/main.jsx](C:/Users/acer/Documents/agentic_Ai-main/frontend/src/main.jsx) - app bootstrap and route table.
-- [frontend/src/shell/AppShell.jsx](C:/Users/acer/Documents/agentic_Ai-main/frontend/src/shell/AppShell.jsx) - shared shell and navigation.
-- [frontend/src/pages/AuditPage.jsx](C:/Users/acer/Documents/agentic_Ai-main/frontend/src/pages/AuditPage.jsx) - job detail and review view.
-- [backend/app/main.py](C:/Users/acer/Documents/agentic_Ai-main/backend/app/main.py) - FastAPI entrypoint.
-- [backend/app/api/](C:/Users/acer/Documents/agentic_Ai-main/backend/app/api) - API routers.
-- [backend/app/services/](C:/Users/acer/Documents/agentic_Ai-main/backend/app/services) - business logic and pipeline helpers.
+- [frontend/src/main.jsx](frontend/src/main.jsx) - app bootstrap and route table.
+- [frontend/src/shell/AppShell.jsx](frontend/src/shell/AppShell.jsx) - shared shell and navigation.
+- [frontend/src/pages/AuditPage.jsx](frontend/src/pages/AuditPage.jsx) - job detail and review view.
+- [backend/app/main.py](backend/app/main.py) - FastAPI entrypoint.
+- [backend/app/api/](backend/app/api) - API routers.
+- [backend/app/services/](backend/app/services) - business logic and pipeline helpers.
 
 ## Run Locally
 
@@ -324,6 +324,14 @@ Backend:
 cd backend
 python -m uvicorn app.main:app --reload
 ```
+
+Agent framework (installable package):
+
+```bash
+pip install -e ./agent-framework
+```
+
+This makes `finflow_agent` importable without any `sys.path` manipulation, e.g. `from finflow_agent.engine import ExecutionEngine`.
 
 ## Notes
 
@@ -345,8 +353,8 @@ If you want to add a new agent, action type, or planning branch, keep the change
 
 Useful places to start:
 
-- [backend/app/services/canonical_intent.py](C:/Users/acer/Documents/agentic_Ai-main/backend/app/services/canonical_intent.py)
-- [backend/app/services/semantic_pipeline.py](C:/Users/acer/Documents/agentic_Ai-main/backend/app/services/semantic_pipeline.py)
-- [backend/app/services/clarification_service.py](C:/Users/acer/Documents/agentic_Ai-main/backend/app/services/clarification_service.py)
-- [backend/app/services/agent_dispatcher.py](C:/Users/acer/Documents/agentic_Ai-main/backend/app/services/agent_dispatcher.py)
-- [agent-framework/new-agentic-project-data-cleaning-/src/finflow_agent/planning/compiler.py](C:/Users/acer/Documents/agentic_Ai-main/agent-framework/new-agentic-project-data-cleaning-/src/finflow_agent/planning/compiler.py)
+- [backend/app/services/canonical_intent.py](backend/app/services/canonical_intent.py)
+- [backend/app/services/semantic_pipeline.py](backend/app/services/semantic_pipeline.py)
+- [backend/app/services/clarification_service.py](backend/app/services/clarification_service.py)
+- [backend/app/services/agent_dispatcher.py](backend/app/services/agent_dispatcher.py)
+- [agent-framework/src/finflow_agent/planning/compiler.py](agent-framework/src/finflow_agent/planning/compiler.py)

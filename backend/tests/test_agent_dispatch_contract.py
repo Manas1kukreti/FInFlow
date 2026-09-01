@@ -67,7 +67,7 @@ def _repo_root() -> Path:
 
 
 def _agent_service_job_payload_fields() -> list[str]:
-    source = (_repo_root() / "agent-framework" / "new-agentic-project-data-cleaning-" / "src" / "finflow_agent" / "api.py").read_text(encoding="utf-8")
+    source = (_repo_root() / "agent-framework" / "src" / "finflow_agent" / "api.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == "JobPayload":

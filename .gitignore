@@ -21,6 +21,11 @@ outputs/
 logs/
 *.log
 
+# Python packaging build artifacts
+*.egg-info/
+*.egg
+.eggs/
+
 .vscode/
 .idea/
 .kiro/
@@ -36,5 +41,16 @@ Thumbs.db
 *.key
 
 .pytest_cache/
+.pytest_tmp/
+.pytest-tmp/
+.pytest-tmp-local/
+.pytest-*/
 __pycache__/
 *.pyc
+
+# Runtime-generated agent job state
+jobs_store.json
+runtime/
+
+# Generated progress report
+progress.md

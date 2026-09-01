@@ -47,7 +47,7 @@ If logs mention `localhost:5433`, the backend service is still pointed at a loca
 
 ## Agent service
 
-Set the service root to `agent-framework/new-agentic-project-data-cleaning-`.
+Set the service root to `agent-framework`.
 
 Required variables:
 

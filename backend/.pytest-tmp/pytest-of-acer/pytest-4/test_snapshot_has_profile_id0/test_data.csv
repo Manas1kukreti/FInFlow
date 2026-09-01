@@ -1,6 +1,0 @@
-id,name,amount,status
-1,Alice,100.5,active
-2,Bob,200.0,active
-3,Charlie,,inactive
-4,Diana,350.75,active
-5,Eve,400.0,inactive

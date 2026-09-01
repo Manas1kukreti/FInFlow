@@ -8,7 +8,6 @@ import pytest
 SRC_ROOT = (
     Path(__file__).resolve().parents[2]
     / "agent-framework"
-    / "new-agentic-project-data-cleaning-"
     / "src"
 )
 if str(SRC_ROOT) not in sys.path:

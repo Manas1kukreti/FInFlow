@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finflow-agent"
+version = "0.1.0"
+description = "FinFlow agent framework: semantic grounding, deterministic planning, and worker execution."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.111.0",
+    "uvicorn==0.30.1",
+    "pydantic==2.7.4",
+    "langgraph==0.1.2",
+    "langchain-core==0.2.9",
+    "groq==0.9.0",
+    "redis>=4.2.0,<5.0.0",
+    "arq==0.26.0",
+    "python-dotenv==1.0.1",
+    "pandas==2.2.2",
+    "openpyxl==3.1.5",
+    "xlsxwriter==3.2.0",
+    "asyncpg==0.29.0",
+    "sqlalchemy==2.0.30",
+    "langchain-groq",
+    "httpx==0.27.0",
+    "rapidfuzz>=3.9.0,<4.0.0",
+    "pdfplumber==0.11.4",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "architecture_tests/tests"]

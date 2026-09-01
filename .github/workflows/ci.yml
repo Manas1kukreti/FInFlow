@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  agent-framework:
+    name: Agent framework (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install the finflow_agent package (editable, with test extras)
+        run: pip install -e "./agent-framework[test]"
+
+      - name: Run pytest
+        working-directory: agent-framework
+        run: pytest
+
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt pytest pytest-asyncio
+
+      # The backend tests import ``finflow_agent`` through the pipeline
+      # bridge, so the agent package must be importable during the run.
+      # Install without deps: the backend requirements already provide the
+      # shared runtime libraries and pin their own compatible versions.
+      - name: Install the finflow_agent package (no deps)
+        run: pip install -e ./agent-framework --no-deps
+
+      - name: Run pytest
+        working-directory: backend
+        run: pytest
+
+  frontend:
+    name: Frontend (build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
