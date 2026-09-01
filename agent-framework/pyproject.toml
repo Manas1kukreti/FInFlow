@@ -31,8 +31,11 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
+    "pytest>=8.0,<9",
+    # Pin to the 0.x line: pytest-asyncio 1.0 changed collection/event-loop
+    # handling in ways that break the class-based ``@pytest.mark.asyncio``
+    # tests in this suite. 0.26.x is the version verified to pass.
+    "pytest-asyncio>=0.23,<0.27",
 ]
 
 [tool.setuptools]
@@ -43,3 +46,5 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "architecture_tests/tests"]
+# Tests opt in to async explicitly via @pytest.mark.asyncio.
+asyncio_mode = "strict"
