@@ -31,8 +31,8 @@ It is built for teams that need to upload XLSX files, describe work in plain Eng
 
 ```mermaid
 flowchart LR
-  U[User] --> F["Frontend<br/>React + Vite"]
-  F -->|REST /api| B["Backend<br/>FastAPI"]
+  U[User] --> F["Frontend (React + Vite)"]
+  F -->|REST /api| B["Backend (FastAPI)"]
   F -->|WebSocket updates| WS[WebSocket channel]
   B --> DB[(PostgreSQL)]
   B --> R[(Redis)]
